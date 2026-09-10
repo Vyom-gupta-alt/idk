@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vyom Gupta — Full-Stack Developer & Creative Technologist</title>
+<meta name="description" content="Portfolio of Vyom Gupta — full-stack developer and creative technologist building fast, interactive, and beautiful digital experiences.">
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Preloader -->
+<div class="preloader" id="preloader">
+  <div class="preloader-inner">
+    <span class="preloader-name">VG</span>
+    <div class="preloader-bar"><span id="preloader-progress"></span></div>
+  </div>
+</div>
+
+<!-- Custom cursor -->
+<div class="cursor-dot" id="cursorDot"></div>
+<div class="cursor-ring" id="cursorRing"></div>
+
+<!-- Scroll progress bar -->
+<div class="scroll-progress" id="scrollProgress"></div>
+
+<!-- Noise / grain overlay -->
+<div class="grain"></div>
+
+<!-- Nav -->
+<header class="nav" id="nav">
+  <a href="#home" class="nav-logo" data-cursor="hover">VG<span class="dot">.</span></a>
+  <nav class="nav-links" id="navLinks">
+    <a href="#home" class="nav-link" data-cursor="hover"><span>01</span> Home</a>
+    <a href="#about" class="nav-link" data-cursor="hover"><span>02</span> About</a>
+    <a href="#skills" class="nav-link" data-cursor="hover"><span>03</span> Skills</a>
+    <a href="#work" class="nav-link" data-cursor="hover"><span>04</span> Work</a>
+    <a href="#reviews" class="nav-link" data-cursor="hover"><span>05</span> Reviews</a>
+    <a href="#contact" class="nav-link" data-cursor="hover"><span>06</span> Contact</a>
+  </nav>
+  <a href="#contact" class="nav-cta" data-cursor="hover">Let's Talk</a>
+  <button class="nav-toggle" id="navToggle" aria-label="Toggle menu">
+    <span></span><span></span><span></span>
+  </button>
+</header>
+
+<main>
+
+  <!-- HERO -->
+  <section class="hero" id="home">
+    <div class="hero-blob blob-a"></div>
+    <div class="hero-blob blob-b"></div>
+    <div class="hero-grid"></div>
+
+    <div class="hero-content">
+      <p class="hero-eyebrow reveal-up"><span class="pulse-dot"></span> Available for freelance & full-time roles</p>
+      <h1 class="hero-title">
+        <span class="line" data-split>Building interfaces</span>
+        <span class="line" data-split>that feel <em>alive</em>.</span>
+      </h1>
+      <p class="hero-sub reveal-up" data-delay="1">I'm <strong>Vyom Gupta</strong> — a full-stack developer & creative technologist crafting fast, accessible, and delightfully animated web experiences.</p>
+      <div class="hero-actions reveal-up" data-delay="2">
+        <a href="#work" class="btn btn-primary" data-cursor="hover"><span>View My Work</span></a>
+        <a href="#contact" class="btn btn-ghost" data-cursor="hover"><span>Get In Touch</span></a>
+      </div>
+    </div>
+
+    <div class="hero-marquee">
+      <div class="marquee-track">
+        <span>Frontend Engineering</span><span>•</span>
+        <span>Product Design</span><span>•</span>
+        <span>Motion & Interaction</span><span>•</span>
+        <span>Backend Systems</span><span>•</span>
+        <span>Frontend Engineering</span><span>•</span>
+        <span>Product Design</span><span>•</span>
+        <span>Motion & Interaction</span><span>•</span>
+        <span>Backend Systems</span><span>•</span>
+      </div>
+    </div>
+
+    <a href="#about" class="scroll-cue" data-cursor="hover">
+      <span>Scroll</span>
+      <div class="scroll-cue-line"><i></i></div>
+    </a>
+  </section>
+
+  <!-- ABOUT -->
+  <section class="about" id="about">
+    <div class="section-head">
+      <p class="section-tag reveal-up">// About Me</p>
+      <h2 class="section-title reveal-up">A little about how I work</h2>
+    </div>
+
+    <div class="about-grid">
+      <div class="about-visual reveal-up">
+        <div class="about-card">
+          <div class="about-avatar">VG</div>
+          <div class="about-status"><span class="pulse-dot"></span> Currently building at large</div>
+        </div>
+        <div class="about-orbit"></div>
+      </div>
+
+      <div class="about-copy reveal-up" data-delay="1">
+        <p>I'm a full-stack developer based in India with a passion for turning complex problems into simple, elegant, and interactive digital products. Over the past few years I've worked across the stack — from pixel-perfect, animation-rich interfaces to the APIs and databases that power them.</p>
+        <p>I care deeply about the details: the easing curve on a hover state, the load time of a page, the accessibility of a form. Good software should feel effortless — that's the standard I hold every project to.</p>
+
+        <div class="about-stats">
+          <div class="stat">
+            <span class="stat-num" data-count="3" data-suffix="+">0</span>
+            <span class="stat-label">Years Experience</span>
+          </div>
+          <div class="stat">
+            <span class="stat-num" data-count="40" data-suffix="+">0</span>
+            <span class="stat-label">Projects Shipped</span>
+          </div>
+          <div class="stat">
+            <span class="stat-num" data-count="25" data-suffix="+">0</span>
+            <span class="stat-label">Happy Clients</span>
+          </div>
+          <div class="stat">
+            <span class="stat-num" data-count="99" data-suffix="%">0</span>
+            <span class="stat-label">On-Time Delivery</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SKILLS -->
+  <section class="skills" id="skills">
+    <div class="section-head">
+      <p class="section-tag reveal-up">// What I Use</p>
+      <h2 class="section-title reveal-up">Tools & technologies</h2>
+    </div>
+
+    <div class="skills-grid">
+      <div class="skill-card reveal-up">
+        <h3>Frontend</h3>
+        <ul>
+          <li><span>React / Next.js</span><em class="bar"><i style="--w:95%"></i></em></li>
+          <li><span>TypeScript</span><em class="bar"><i style="--w:90%"></i></em></li>
+          <li><span>Tailwind CSS</span><em class="bar"><i style="--w:92%"></i></em></li>
+          <li><span>Framer Motion / GSAP</span><em class="bar"><i style="--w:85%"></i></em></li>
+        </ul>
+      </div>
+      <div class="skill-card reveal-up" data-delay="1">
+        <h3>Backend</h3>
+        <ul>
+          <li><span>Node.js / Express</span><em class="bar"><i style="--w:90%"></i></em></li>
+          <li><span>Python / Django</span><em class="bar"><i style="--w:80%"></i></em></li>
+          <li><span>PostgreSQL / MongoDB</span><em class="bar"><i style="--w:88%"></i></em></li>
+          <li><span>REST & GraphQL APIs</span><em class="bar"><i style="--w:87%"></i></em></li>
+        </ul>
+      </div>
+      <div class="skill-card reveal-up" data-delay="2">
+        <h3>Tools & Platforms</h3>
+        <ul>
+          <li><span>Git / GitHub</span><em class="bar"><i style="--w:95%"></i></em></li>
+          <li><span>Docker</span><em class="bar"><i style="--w:78%"></i></em></li>
+          <li><span>AWS / Vercel</span><em class="bar"><i style="--w:82%"></i></em></li>
+          <li><span>Figma</span><em class="bar"><i style="--w:88%"></i></em></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="skills-marquee">
+      <div class="marquee-track marquee-reverse">
+        <span>JavaScript</span><span>React</span><span>Next.js</span><span>TypeScript</span><span>Node.js</span><span>Tailwind</span><span>PostgreSQL</span><span>Docker</span><span>AWS</span><span>Figma</span><span>GSAP</span>
+        <span>JavaScript</span><span>React</span><span>Next.js</span><span>TypeScript</span><span>Node.js</span><span>Tailwind</span><span>PostgreSQL</span><span>Docker</span><span>AWS</span><span>Figma</span><span>GSAP</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- WORK -->
+  <section class="work" id="work">
+    <div class="section-head">
+      <p class="section-tag reveal-up">// Selected Work</p>
+      <h2 class="section-title reveal-up">Things I've built</h2>
+    </div>
+
+    <div class="work-grid">
+      <article class="work-card reveal-up" data-cursor="hover" style="--grad:linear-gradient(135deg,#7c5cff,#00d4ff)">
+        <div class="work-media"><span class="work-num">01</span></div>
+        <div class="work-info">
+          <h3>Nova Commerce</h3>
+          <p>A full-stack e-commerce platform with real-time inventory, Stripe checkout, and an animated storefront.</p>
+          <div class="work-tags"><span>React</span><span>Node.js</span><span>Stripe</span><span>PostgreSQL</span></div>
+        </div>
+      </article>
+
+      <article class="work-card reveal-up" data-delay="1" data-cursor="hover" style="--grad:linear-gradient(135deg,#ff5c8a,#ffb46b)">
+        <div class="work-media"><span class="work-num">02</span></div>
+        <div class="work-info">
+          <h3>Pulse Analytics</h3>
+          <p>A SaaS dashboard visualizing product metrics in real time, with custom charting and role-based access.</p>
+          <div class="work-tags"><span>Next.js</span><span>D3.js</span><span>GraphQL</span><span>Redis</span></div>
+        </div>
+      </article>
+
+      <article class="work-card reveal-up" data-delay="2" data-cursor="hover" style="--grad:linear-gradient(135deg,#00e0a4,#00b3ff)">
+        <div class="work-media"><span class="work-num">03</span></div>
+        <div class="work-info">
+          <h3>Wanderlust</h3>
+          <p>A travel booking app with interactive maps, itinerary builder, and buttery-smooth page transitions.</p>
+          <div class="work-tags"><span>React Native</span><span>Mapbox</span><span>Firebase</span></div>
+        </div>
+      </article>
+
+      <article class="work-card reveal-up" data-cursor="hover" style="--grad:linear-gradient(135deg,#ffd166,#ff5c8a)">
+        <div class="work-media"><span class="work-num">04</span></div>
+        <div class="work-info">
+          <h3>Cipher Chat</h3>
+          <p>An end-to-end encrypted real-time messaging app with typing indicators and read receipts.</p>
+          <div class="work-tags"><span>Socket.io</span><span>Node.js</span><span>MongoDB</span></div>
+        </div>
+      </article>
+
+      <article class="work-card reveal-up" data-delay="1" data-cursor="hover" style="--grad:linear-gradient(135deg,#7c5cff,#ff5c8a)">
+        <div class="work-media"><span class="work-num">05</span></div>
+        <div class="work-info">
+          <h3>Artisan Studio</h3>
+          <p>A headless CMS-powered portfolio builder for creatives, with drag-and-drop layout and live preview.</p>
+          <div class="work-tags"><span>Next.js</span><span>Sanity CMS</span><span>Tailwind</span></div>
+        </div>
+      </article>
+
+      <article class="work-card reveal-up" data-delay="2" data-cursor="hover" style="--grad:linear-gradient(135deg,#00d4ff,#00e0a4)">
+        <div class="work-media"><span class="work-num">06</span></div>
+        <div class="work-info">
+          <h3>FitTrack</h3>
+          <p>A fitness tracking PWA with offline support, workout analytics, and animated progress rings.</p>
+          <div class="work-tags"><span>Vue.js</span><span>Chart.js</span><span>PWA</span></div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- REVIEWS -->
+  <section class="reviews" id="reviews">
+    <div class="section-head">
+      <p class="section-tag reveal-up">// Testimonials</p>
+      <h2 class="section-title reveal-up">What people say after working with me</h2>
+    </div>
+
+    <div class="reviews-track-wrap reveal-up">
+      <div class="reviews-track" id="reviewsTrack">
+
+        <article class="review-card">
+          <div class="review-stars">★★★★★</div>
+          <p>"Vyom turned our messy requirements into a polished product in weeks, not months. The attention to animation detail alone made our launch feel premium."</p>
+          <div class="review-person">
+            <span class="review-avatar">AK</span>
+            <div>
+              <strong>Aarav Kapoor</strong>
+              <small>Founder, Nova Commerce</small>
+            </div>
+          </div>
+        </article>
+
+        <article class="review-card">
+          <div class="review-stars">★★★★★</div>
+          <p>"One of the rare developers who thinks like a designer too. Communication was crystal clear and every deadline was hit on the dot."</p>
+          <div class="review-person">
+            <span class="review-avatar">SM</span>
+            <div>
+              <strong>Sara Mehta</strong>
+              <small>Product Manager, Pulse Analytics</small>
+            </div>
+          </div>
+        </article>
+
+        <article class="review-card">
+          <div class="review-stars">★★★★★</div>
+          <p>"We handed Vyom a rough sketch and got back a production-ready app with animations we didn't even know we wanted. Highly recommended."</p>
+          <div class="review-person">
+            <span class="review-avatar">RD</span>
+            <div>
+              <strong>Rohan Desai</strong>
+              <small>CTO, Wanderlust</small>
+            </div>
+          </div>
+        </article>
+
+        <article class="review-card">
+          <div class="review-stars">★★★★★</div>
+          <p>"Fast, reliable, and genuinely fun to collaborate with. Our page load times improved and our bounce rate dropped after the redesign."</p>
+          <div class="review-person">
+            <span class="review-avatar">PN</span>
+            <div>
+              <strong>Priya Nair</strong>
+              <small>Marketing Lead, Artisan Studio</small>
+            </div>
+          </div>
+        </article>
+
+        <article class="review-card">
+          <div class="review-stars">★★★★★</div>
+          <p>"Vyom's code is clean, well-documented, and easy to hand off. A true full-stack partner who cares about the end result as much as we do."</p>
+          <div class="review-person">
+            <span class="review-avatar">KV</span>
+            <div>
+              <strong>Karan Verma</strong>
+              <small>Engineering Manager, Cipher Chat</small>
+            </div>
+          </div>
+        </article>
+
+        <article class="review-card">
+          <div class="review-stars">★★★★★</div>
+          <p>"Delivered a stunning fitness app ahead of schedule. Users constantly comment on how smooth and 'alive' the interface feels."</p>
+          <div class="review-person">
+            <span class="review-avatar">IT</span>
+            <div>
+              <strong>Isha Thakur</strong>
+              <small>Founder, FitTrack</small>
+            </div>
+          </div>
+        </article>
+
+        <!-- duplicate set for seamless marquee loop -->
+        <article class="review-card" aria-hidden="true">
+          <div class="review-stars">★★★★★</div>
+          <p>"Vyom turned our messy requirements into a polished product in weeks, not months. The attention to animation detail alone made our launch feel premium."</p>
+          <div class="review-person">
+            <span class="review-avatar">AK</span>
+            <div>
+              <strong>Aarav Kapoor</strong>
+              <small>Founder, Nova Commerce</small>
+            </div>
+          </div>
+        </article>
+        <article class="review-card" aria-hidden="true">
+          <div class="review-stars">★★★★★</div>
+          <p>"One of the rare developers who thinks like a designer too. Communication was crystal clear and every deadline was hit on the dot."</p>
+          <div class="review-person">
+            <span class="review-avatar">SM</span>
+            <div>
+              <strong>Sara Mehta</strong>
+              <small>Product Manager, Pulse Analytics</small>
+            </div>
+          </div>
+        </article>
+        <article class="review-card" aria-hidden="true">
+          <div class="review-stars">★★★★★</div>
+          <p>"We handed Vyom a rough sketch and got back a production-ready app with animations we didn't even know we wanted. Highly recommended."</p>
+          <div class="review-person">
+            <span class="review-avatar">RD</span>
+            <div>
+              <strong>Rohan Desai</strong>
+              <small>CTO, Wanderlust</small>
+            </div>
+          </div>
+        </article>
+
+      </div>
+    </div>
+
+    <div class="reviews-cta reveal-up">
+      <p>Have we worked together?</p>
+      <a href="mailto:vyomveddansh@gmail.com?subject=A%20review%20for%20you" class="btn btn-ghost" data-cursor="hover"><span>Leave a review</span></a>
+    </div>
+  </section>
+
+  <!-- CONTACT -->
+  <section class="contact" id="contact">
+    <div class="contact-inner">
+      <p class="section-tag reveal-up">// Get In Touch</p>
+      <h2 class="contact-title reveal-up">Let's build something<br> <em>great</em> together.</h2>
+      <p class="contact-sub reveal-up" data-delay="1">Have a project in mind, or just want to say hi? My inbox is always open.</p>
+
+      <a href="mailto:vyomveddansh@gmail.com" class="contact-email reveal-up" data-delay="2" data-cursor="hover">vyomveddansh@gmail.com</a>
+
+      <div class="contact-grid reveal-up" data-delay="3">
+        <a href="#" class="social-link" data-cursor="hover">GitHub <span>↗</span></a>
+        <a href="#" class="social-link" data-cursor="hover">LinkedIn <span>↗</span></a>
+        <a href="#" class="social-link" data-cursor="hover">Twitter / X <span>↗</span></a>
+        <a href="#" class="social-link" data-cursor="hover">Instagram <span>↗</span></a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <p>© <span id="year"></span> Vyom Gupta. Crafted with care, coffee, and a few too many keyframes.</p>
+  <a href="#home" class="to-top" id="toTop" data-cursor="hover">Back to top ↑</a>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
