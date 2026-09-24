@@ -2665,7 +2665,9 @@
   const genTag = (p) => (p.gen && p.age <= 21 ? '<span class="tag gen" title="Generated youth player">Academy</span>' : '');
   const compTag = (comp) => (comp ? `<span class="ctag ct-${comp.type} ct-${comp.id}">${esc(comp.type === 'cup' ? comp.name : comp.short)}</span>` : '');
   const delta = (p) => { const d = p.ovr - (p.ovr0 ?? p.ovr); return d ? `<span class="delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '+' : ''}${d}</span>` : ''; };
-  const potRange = (p) => { const lo = Math.max(p.ovr, p.pot - 2), hi = Math.min(95, p.pot + 2); return lo >= hi ? `${hi}` : `${lo}–${hi}`; };
+  // Potential is shown exactly for every player.
+  const potBadge = (p) => `<span class="ovr pot ${ovrClass(p.pot)}" title="Potential: the highest OVR he can reach">${p.pot}</span>`;
+  const potRange = potBadge;
   const stripLeg = (s) => s.replace(/ · (1st|2nd) leg/, '');
   function scoreText(m) {
     if (!m.played) return '<span class="muted">vs</span>';
@@ -2902,7 +2904,7 @@
         <section class="card span2"><h3>Next match</h3>${nmHtml}</section>
         ${c.offers.length ? `<section class="card span2 offers"><h3>Transfer offers</h3>${c.offers.map((o) => {
           const p = S.players[o.pid];
-          return `<div class="offer"><div>${crest(S.clubs[o.clubId])} <strong>${esc(clubName(o.clubId))}</strong> bid <strong class="money">${money(o.amount)}</strong> for ${playerLink(p)} ${posBadge(p.pos)} ${ovrBadge(p.ovr)} <span class="muted small">(value ${money(playerValue(p))})</span></div>
+          return `<div class="offer"><div>${crest(S.clubs[o.clubId])} <strong>${esc(clubName(o.clubId))}</strong> bid <strong class="money">${money(o.amount)}</strong> for ${playerLink(p)} ${posBadge(p.pos)} ${ovrBadge(p.ovr)} ${potBadge(p)} <span class="muted small">(value ${money(playerValue(p))})</span></div>
           <div class="row gap"><button class="btn primary sm" data-act="accept-offer" data-id="${o.id}">Accept</button><button class="btn ghost sm" data-act="reject-offer" data-id="${o.id}">Reject</button></div></div>`;
         }).join('')}</section>` : ''}
         ${(() => { const ex = squad.filter((p) => expiring(p)).sort((a, b) => b.ovr - a.ovr); return ex.length ? `<section class="card span2 offers"><h3>Contracts expiring this season</h3><p class="muted small">These players leave on a free transfer at the end of the season unless you agree new deals.</p><ul class="plist">${ex.map((p) => `<li>${posBadge(p.pos)} ${playerLink(p)} ${ovrBadge(p.ovr)} <span class="muted small">age ${p.age} · ${money(p.wage)}/wk</span><button class="btn xs primary ml-auto" data-act="renew" data-id="${p.id}">Negotiate</button></li>`).join('')}</ul></section>` : ''; })()}
@@ -3425,8 +3427,8 @@
       <section class="card">
         <div class="row between wrap gap"><h3>${crest(club)} ${esc(club.name)}</h3><span class="muted">${esc(S.leagues[club.leagueId].name)} · ${ordinal(pos)} · Team OVR ${clubRating(club.id)} · ${club.formation}</span></div>
         <p class="muted small">The manager picks the team. Players marked ● are in his current best XI.</p>
-        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pos</th><th class="left">Name</th><th>Age</th><th>OVR</th><th>Form</th><th>Apps</th><th>G</th><th>A</th><th>Avg</th></tr></thead><tbody>
-        ${players.map((p) => `<tr class="${p.id === c.pid ? 'me' : ''} ${!available(p) ? 'unavail' : ''}"><td>${posBadge(p.pos)}</td><td class="left">${inXi.has(p.id) ? '<span class="xi-dot"></span>' : ''}${playerLink(p)} ${statusIcons(p)} ${p.id === c.pid ? '<span class="tag good">YOU</span>' : ''}</td><td>${p.age}</td><td>${ovrBadge(p.ovr)}${delta(p)}</td><td>${formArrow(p.form)}</td><td>${p.st.apps}</td><td>${p.st.goals}</td><td>${p.st.assists}</td><td>${p.st.apps ? avgRating(p).toFixed(2) : '-'}</td></tr>`).join('')}
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pos</th><th class="left">Name</th><th>Age</th><th>OVR</th><th>POT</th><th>Form</th><th>Apps</th><th>G</th><th>A</th><th>Avg</th></tr></thead><tbody>
+        ${players.map((p) => `<tr class="${p.id === c.pid ? 'me' : ''} ${!available(p) ? 'unavail' : ''}"><td>${posBadge(p.pos)}</td><td class="left">${inXi.has(p.id) ? '<span class="xi-dot"></span>' : ''}${playerLink(p)} ${statusIcons(p)} ${p.id === c.pid ? '<span class="tag good">YOU</span>' : ''}</td><td>${p.age}</td><td>${ovrBadge(p.ovr)}${delta(p)}</td><td>${potBadge(p)}</td><td>${formArrow(p.form)}</td><td>${p.st.apps}</td><td>${p.st.goals}</td><td>${p.st.assists}</td><td>${p.st.apps ? avgRating(p).toFixed(2) : '-'}</td></tr>`).join('')}
         </tbody></table></div>
       </section>`;
   }
@@ -3455,7 +3457,7 @@
     }).join('');
     const sorters = {
       pos: (a, b) => POS_ORDER[a.pos] - POS_ORDER[b.pos] || b.ovr - a.ovr,
-      ovr: (a, b) => b.ovr - a.ovr, age: (a, b) => a.age - b.age, value: (a, b) => playerValue(b) - playerValue(a),
+      ovr: (a, b) => b.ovr - a.ovr, pot: (a, b) => b.pot - a.pot || a.age - b.age, age: (a, b) => a.age - b.age, value: (a, b) => playerValue(b) - playerValue(a),
       goals: (a, b) => b.st.goals - a.st.goals, rating: (a, b) => avgRating(b) - avgRating(a), wage: (a, b) => b.wage - a.wage,
     };
     const players = club.pids.map((id) => S.players[id]).sort(sorters[ui.squadSort] || sorters.pos);
@@ -3488,12 +3490,12 @@
         <section class="card">
           <h3>Squad <span class="muted small">${club.pids.length}/${MAX_SQUAD} players · wages ${money(bill)}/wk of ${money(c.wageBudget)}</span></h3>
           <div class="tbl-wrap"><table class="tbl squad-tbl"><thead><tr>
-            ${th('pos', 'Pos')}<th class="left">Name</th>${th('age', 'Age')}${th('ovr', 'OVR')}${selPos ? `<th title="Rating in ${selPos}">@${selPos}</th>` : ''}<th>Form</th><th>Apps</th>${th('goals', 'G')}<th>A</th>${th('rating', 'Avg')}${th('value', 'Value')}${th('wage', 'Wage')}<th>Contract</th><th></th>
+            ${th('pos', 'Pos')}<th class="left">Name</th>${th('age', 'Age')}${th('ovr', 'OVR')}${th('pot', 'POT')}${selPos ? `<th title="Rating in ${selPos}">@${selPos}</th>` : ''}<th>Form</th><th>Apps</th>${th('goals', 'G')}<th>A</th>${th('rating', 'Avg')}${th('value', 'Value')}${th('wage', 'Wage')}<th>Contract</th><th></th>
           </tr></thead><tbody>
           ${players.map((p) => `<tr class="${lineupSet.has(p.id) ? 'starter' : ''} ${selPos ? 'pickable' : ''} ${!available(p) ? 'unavail' : ''}" ${selPos ? `data-act="assign" data-id="${p.id}"` : ''}>
             <td>${posBadge(p.pos)}</td>
             <td class="left name-cell">${lineupSet.has(p.id) ? '<span class="xi-dot" title="In your XI"></span>' : ''}${selPos ? esc(p.name) : playerLink(p)} ${statusIcons(p)} ${genTag(p)}</td>
-            <td>${p.age}</td><td>${ovrBadge(p.ovr)}${delta(p)}</td>
+            <td>${p.age}</td><td>${ovrBadge(p.ovr)}${delta(p)}</td><td>${potBadge(p)}</td>
             ${selPos ? `<td><strong class="${fit(p.pos, selPos) < 0 ? 'warn-t' : ''}">${eff(p, selPos)}</strong></td>` : ''}
             <td>${formArrow(p.form)}</td><td>${p.st.apps}</td><td>${p.st.goals}</td><td>${p.st.assists}</td><td>${p.st.apps ? avgRating(p).toFixed(2) : '-'}</td>
             <td class="money">${money(playerValue(p))}</td><td class="money muted">${money(p.wage)}</td>
@@ -3560,7 +3562,7 @@
         <p class="muted small">${total} players. <strong>Est. fee</strong> is what the selling club wants: key players and young talents cost more, and so does buying from a league rival or in January. <strong>Interest</strong> shows whether the player would move to your club, which depends on its size, league, European football and his role.</p>
         <div class="tbl-wrap"><table class="tbl market"><thead><tr><th>Pos</th><th class="left">Name</th><th>Age</th><th>OVR</th><th>POT</th><th class="left">Club</th><th>Value</th><th>Est. fee</th><th>Interest</th><th></th></tr></thead><tbody>
           ${rows.map(({ p, fee }) => { const it = interest(p, c.clubId); const can = (win.open || p.clubId === 'FA') && it.lvl > 0; return `<tr>
-            <td>${posBadge(p.pos)}</td><td class="left">${playerLink(p)} ${genTag(p)} ${statusIcons(p)}</td><td>${p.age}</td><td>${ovrBadge(p.ovr)}${delta(p)}</td><td class="muted small">${potRange(p)}</td>
+            <td>${posBadge(p.pos)}</td><td class="left">${playerLink(p)} ${genTag(p)} ${statusIcons(p)}</td><td>${p.age}</td><td>${ovrBadge(p.ovr)}${delta(p)}</td><td>${potBadge(p)}</td>
             <td class="left small">${esc(S.clubs[p.clubId].name)}</td><td class="money muted">${money(playerValue(p))}</td><td class="money"><strong>${money(fee)}</strong></td><td>${interestTag(it)}</td>
             <td><button class="btn xs ${can ? 'primary' : 'ghost'}" data-act="buy" data-id="${p.id}">${p.clubId === 'FA' ? 'Sign' : 'Negotiate'}</button></td>
           </tr>`; }).join('')}
@@ -3902,8 +3904,6 @@
     const youth = S.clubs.YTH.pids.map((id) => S.players[id]).filter(Boolean).sort((x, y) => y.pot - x.pot);
     const upCost = a.level < 5 ? niceRound(ACADEMY_COST[a.level] * leagueFactor()) : 0;
     const scoutCost = niceRound(0.4e6 * leagueFactor());
-    const width = Math.max(1, 6 - a.level);
-    const potR = (p) => `${Math.max(p.ovr, p.pot - width)}–${Math.min(95, p.pot + width)}`;
     return `
       <div class="grid g2">
         <section class="card">
@@ -3913,7 +3913,7 @@
             <div class="big-stat"><span>Prospects</span><strong>${youth.length}</strong></div>
             <div class="big-stat"><span>Scouting this season</span><strong>${a.scouted}/3 missions</strong></div>
           </div>
-          <p class="muted small">Better facilities mean more prospects at every youth intake, higher starting ratings and potential, faster development, and more accurate potential estimates. Prospects train and improve every time your first team plays.</p>
+          <p class="muted small">Better facilities mean more prospects at every youth intake, higher starting ratings and potential, and faster development. Prospects train and improve every time your first team plays.</p>
           ${a.level < 5 ? `<button class="btn primary" data-act="academy-upgrade" ${S.clubs[c.clubId].budget < upCost ? 'disabled' : ''}>Upgrade to level ${a.level + 1} · ${money(upCost)}</button>` : '<p class="small">Your academy is world class.</p>'}
         </section>
         <section class="card">
@@ -3924,8 +3924,8 @@
       </div>
       <section class="card">
         <h3>Prospects <span class="muted small">Promote players to your first team before they turn 19, or they leave the academy.</span></h3>
-        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pos</th><th class="left">Name</th><th>Nat</th><th>Age</th><th>OVR</th><th>POT (est.)</th><th>Progress</th><th></th></tr></thead><tbody>
-          ${youth.map((p) => `<tr class="${p.age >= 18 ? 'warn-row' : ''}"><td>${posBadge(p.pos)}</td><td class="left">${playerLink(p)} ${p.pot >= 86 ? '<span class="tag good">Wonderkid</span>' : ''}</td><td>${natTag(p.nat)}</td><td>${p.age}${p.age >= 18 ? ' <span class="tag warn">last season</span>' : ''}</td><td>${ovrBadge(p.ovr)}${delta(p)}</td><td>${potR(p)}</td>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pos</th><th class="left">Name</th><th>Nat</th><th>Age</th><th>OVR</th><th>POT</th><th>Progress</th><th></th></tr></thead><tbody>
+          ${youth.map((p) => `<tr class="${p.age >= 18 ? 'warn-row' : ''}"><td>${posBadge(p.pos)}</td><td class="left">${playerLink(p)} ${p.pot >= 86 ? '<span class="tag good">Wonderkid</span>' : ''}</td><td>${natTag(p.nat)}</td><td>${p.age}${p.age >= 18 ? ' <span class="tag warn">last season</span>' : ''}</td><td>${ovrBadge(p.ovr)}${delta(p)}</td><td>${potBadge(p)}</td>
             <td><div class="xpbar small-bar"><i style="width:${clamp((p.xp || 0) / 8, 0, 1) * 100}%"></i></div></td>
             <td class="nowrap"><button class="btn xs primary" data-act="youth-promote" data-id="${p.id}">Promote</button> <button class="btn xs ghost" data-act="youth-release" data-id="${p.id}">Release</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted">No prospects. Send your scouts out or wait for the next youth intake.</td></tr>'}
         </tbody></table></div>
@@ -4083,7 +4083,7 @@
     ui.sellOffers = { pid, offers };
     openModal(`
       <h2>Sell ${esc(p.name)}</h2>
-      <p class="muted">${posBadge(p.pos)} ${ovrBadge(p.ovr)} · Age ${p.age} · Market value <strong class="money">${money(playerValue(p))}</strong> · Wage ${money(p.wage)}/wk</p>
+      <p class="muted">${posBadge(p.pos)} ${ovrBadge(p.ovr)} POT ${potBadge(p)} · Age ${p.age} · Market value <strong class="money">${money(playerValue(p))}</strong> · Wage ${money(p.wage)}/wk</p>
       ${!win.open ? `<div class="notice">${esc(win.label)}. You can only release players until the window opens.</div>` : offers.length ? `<ul class="offer-list">${offers.map((o, i) => `<li>${crest(S.clubs[o.clubId])} <strong>${esc(clubName(o.clubId))}</strong> <span class="muted small">${esc(S.leagues[S.clubs[o.clubId].leagueId]?.name || '')}</span><span class="ml-auto money"><strong>${money(o.amount)}</strong></span><button class="btn primary sm" data-act="accept-sale" data-id="${i}">Accept</button></li>`).join('')}</ul>` : '<p>No club can afford him right now.</p>'}
       <div class="row gap mt">${win.open ? `<button class="btn ghost sm" data-act="refresh-offers" data-id="${pid}">Ask around again</button>` : ''}<button class="btn ghost danger sm" data-act="release" data-id="${pid}">Release for free</button></div>`);
   }
@@ -4096,7 +4096,7 @@
     ui.loanOffers = { pid, offers };
     openModal(`
       <h2>Loan out ${esc(p.name)}</h2>
-      <p class="muted">${posBadge(p.pos)} ${ovrBadge(p.ovr)} · Age ${p.age} · Wage ${money(p.wage)}/wk · Loan until the end of ${seasonLabel(loanSeason())}</p>
+      <p class="muted">${posBadge(p.pos)} ${ovrBadge(p.ovr)} POT ${potBadge(p)} · Age ${p.age} · Wage ${money(p.wage)}/wk · Loan until the end of ${seasonLabel(loanSeason())}</p>
       <p class="small muted">Regular football helps players develop faster. You can recall him while a window is open, and he comes back in the summer.</p>
       ${offers.length ? `<ul class="offer-list loan-list">${offers.map((o, i) => { const cl = S.clubs[o.clubId]; return `<li>
         ${crest(cl)} <div class="grow"><strong>${esc(cl.name)}</strong> ${ovrBadge(clubRating(cl.id))} <span class="muted small">${esc(S.leagues[cl.leagueId]?.name || '')}</span><br>
@@ -4110,8 +4110,8 @@
     return `
       <section class="card">
         <h3>Out on loan <span class="muted small">${list.length}/${MAX_LOANS}</span></h3>
-        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pos</th><th class="left">Name</th><th>Age</th><th>OVR</th><th class="left">Club</th><th>Apps</th><th>G</th><th>A</th><th>Avg</th><th>Wages</th><th>Until</th><th></th></tr></thead><tbody>
-        ${list.map((p) => `<tr><td>${posBadge(p.pos)}</td><td class="left">${playerLink(p)} ${statusIcons(p)}</td><td>${p.age}</td><td>${ovrBadge(p.ovr)}${p.ovr !== p.loan.ovr ? `<span class="form ${p.ovr > p.loan.ovr ? 'up' : 'down'} small"> ${p.ovr > p.loan.ovr ? '+' : ''}${p.ovr - p.loan.ovr}</span>` : ''}</td>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pos</th><th class="left">Name</th><th>Age</th><th>OVR</th><th>POT</th><th class="left">Club</th><th>Apps</th><th>G</th><th>A</th><th>Avg</th><th>Wages</th><th>Until</th><th></th></tr></thead><tbody>
+        ${list.map((p) => `<tr><td>${posBadge(p.pos)}</td><td class="left">${playerLink(p)} ${statusIcons(p)}</td><td>${p.age}</td><td>${ovrBadge(p.ovr)}${p.ovr !== p.loan.ovr ? `<span class="form ${p.ovr > p.loan.ovr ? 'up' : 'down'} small"> ${p.ovr > p.loan.ovr ? '+' : ''}${p.ovr - p.loan.ovr}</span>` : ''}</td><td>${potBadge(p)}</td>
           <td class="left">${crest(S.clubs[p.clubId], 'sm')} ${esc(clubName(p.clubId))}${p.loan.buy ? ` <span class="muted small" title="Option to buy">opt. ${money(p.loan.buy)}</span>` : ''}</td>
           <td>${p.st.apps}</td><td>${p.st.goals}</td><td>${p.st.assists}</td><td>${p.st.apps ? avgRating(p).toFixed(2) : '-'}</td>
           <td class="money muted small">${p.loan.pct}% · ${money(Math.round(p.wage * p.loan.pct / 100))}</td><td class="muted small">${seasonLabel(p.loan.season)}</td>
