@@ -369,7 +369,16 @@
   }
   const avgRating = (p) => (p.st.apps ? p.st.rsum / p.st.apps : 0);
   const available = (p) => p && p.inj <= 0 && p.sus <= 0 && !p.away;
-  const eff = (p, slot) => Math.round(p.ovr + fit(p.pos, slot) + clamp(p.form || 0, -2, 2));
+  // Fit for a player: learned positions count as natural; positions in training are partly learned.
+  function pfit(p, slot) {
+    if (p.pos === slot) return 0;
+    let f = fit(p.pos, slot);
+    if (!p.alt && !p.fam) return f;
+    if (p.alt) for (const x of p.alt) { if (x === slot) return 0; f = Math.max(f, fit(x, slot)); }
+    const fm = p.fam && p.fam[slot];
+    return fm ? Math.round(f * (1 - fm / 100)) : f;
+  }
+  const eff = (p, slot) => Math.round(p.ovr + pfit(p, slot) + clamp(p.form || 0, -2, 2));
 
   /* ------------------------------------------------------------------ *
    * Team selection
@@ -528,6 +537,8 @@
     const say = (type, side, msg, extra) => { if (text) text.push({ lbl, type, side, text: msg, score: score.slice(), i: ticks, ...(extra || {}) }); };
     const effOf = (pid) => eff(S.players[pid], pm[pid].slot);
     const gkOf = (t) => sides[t].xi.find((x) => x.slot === 'GK')?.pid;
+    // Trained attribute points above a player's natural level (training focus).
+    const tbon = (pid, k) => { const tb = S.players[pid]?.tb; return tb && tb[k] ? tb[k] * 0.6 : 0; };
     const onLine = (t, line) => sides[t].xi.filter((x) => LINE[x.slot] === line).map((x) => x.pid);
     const anyOf = (t, line) => { const l = onLine(t, line); return l.length ? pick(l) : pick(sides[t].xi)?.pid; };
     const sty = [STYLES[H.style] || STYLES.balanced, STYLES[A.style] || STYLES.balanced];
@@ -610,7 +621,7 @@
         const cr = pickW(t, ASSIST_W, 2, hd, 'assist');
         if (hd && cr) {
           st.shots[t]++;
-          const he = effOf(hd) - 4;
+          const he = effOf(hd) - 4 + tbon(hd, 'PHY');
           if (rand() < clamp(0.36 + (he - 75) / 90, 0.2, 0.5)) {
             st.sot[t]++;
             if (rand() < clamp(0.3 + (he - str[o].gk) / 120, 0.12, 0.45)) { goal(t, hd, cr, 'cross'); return; }
@@ -624,7 +635,7 @@
       }
       const sh = pickW(t, SHOOT_W, 3, null, 'shoot');
       if (!sh) return;
-      const se = effOf(sh);
+      const se = effOf(sh) + tbon(sh, 'SHO');
       st.shots[t]++;
       if (rand() > clamp(0.38 + (se - 75) / 90, 0.25, 0.55)) {
         if (rand() < 0.07) { mark(6); say('chance', t, T('woodwork', { p: nm(sh), gk: nm(gkOf(o)) })); }
@@ -713,7 +724,7 @@
       if (fav && side.bench.includes(fav) && rand() < 0.6) {
         const fp = S.players[fav];
         let be = -99;
-        for (const x of cands) { const g = eff(fp, x.slot) - effOf(x.pid); if (fit(fp.pos, x.slot) >= -3 && g > be) { be = g; out = x; } }
+        for (const x of cands) { const g = eff(fp, x.slot) - effOf(x.pid); if (pfit(fp, x.slot) >= -3 && g > be) { be = g; out = x; } }
         if (out) inn = fav;
       }
       if (!out) {
@@ -1305,6 +1316,9 @@
       g *= clamp((93 - p.ovr) / 16, 0.15, 1); // the better a player already is, the harder each point gets
     }
     p.xp = (p.xp || 0) + g;
+    levelUp(p, mine);
+  }
+  function levelUp(p, mine) {
     const TH = 8;
     while (p.xp >= TH) {
       p.xp -= TH;
@@ -1314,6 +1328,87 @@
       p.xp += TH;
       if (p.ovr > 40) { p.ovr--; if (mine) news(`📉 ${p.name} has dropped to ${p.ovr} OVR.`, 'bad'); }
     }
+  }
+
+  /* --- Attributes & training --- */
+  const ATTRS = ['PAC', 'SHO', 'PAS', 'DRI', 'DEF', 'PHY'];
+  const GK_ATTRS = ['DIV', 'HAN', 'KIC', 'REF', 'SPD', 'POS'];
+  const ATTR_NAME = { PAC: 'Pace', SHO: 'Shooting', PAS: 'Passing', DRI: 'Dribbling', DEF: 'Defending', PHY: 'Physical', DIV: 'Diving', HAN: 'Handling', KIC: 'Kicking', REF: 'Reflexes', SPD: 'Speed', POS: 'Positioning' };
+  // [offset from OVR, weight in OVR] per attribute, by position.
+  const APROF = {
+    ST: { PAC: [2, 0.2], SHO: [4, 0.4], PAS: [-8, 0.05], DRI: [0, 0.2], DEF: [-45, 0], PHY: [-2, 0.15] },
+    W: { PAC: [6, 0.3], SHO: [-1, 0.2], PAS: [-3, 0.2], DRI: [3, 0.3], DEF: [-45, 0], PHY: [-14, 0] },
+    WM: { PAC: [5, 0.3], SHO: [-6, 0.15], PAS: [0, 0.3], DRI: [1, 0.25], DEF: [-30, 0], PHY: [-10, 0] },
+    CAM: { PAC: [-2, 0.1], SHO: [-1, 0.25], PAS: [2, 0.35], DRI: [3, 0.3], DEF: [-40, 0], PHY: [-15, 0] },
+    CM: { PAC: [-6, 0], SHO: [-6, 0.1], PAS: [3, 0.4], DRI: [0, 0.2], DEF: [-10, 0.2], PHY: [-4, 0.1] },
+    CDM: { PAC: [-12, 0], SHO: [-18, 0], PAS: [-1, 0.25], DRI: [-6, 0], DEF: [2, 0.45], PHY: [1, 0.3] },
+    FB: { PAC: [3, 0.3], SHO: [-30, 0], PAS: [-6, 0.2], DRI: [-5, 0], DEF: [-2, 0.35], PHY: [-6, 0.15] },
+    CB: { PAC: [-12, 0.1], SHO: [-40, 0], PAS: [-18, 0], DRI: [-18, 0], DEF: [3, 0.6], PHY: [2, 0.3] },
+    GK: { DIV: [1, 0.25], HAN: [-1, 0.2], KIC: [-12, 0.05], REF: [2, 0.3], SPD: [-30, 0], POS: [0, 0.2] },
+  };
+  const PROF_OF = { ST: 'ST', LW: 'W', RW: 'W', LM: 'WM', RM: 'WM', CAM: 'CAM', CM: 'CM', CDM: 'CDM', LB: 'FB', RB: 'FB', LWB: 'FB', RWB: 'FB', CB: 'CB', GK: 'GK' };
+  const attrKeys = (p) => (p.pos === 'GK' ? GK_ATTRS : ATTRS);
+  function attr(p, k) {
+    const pr = APROF[PROF_OF[p.pos]][k];
+    const base = p.ovr + (pr ? pr[0] : -20) + Math.round((hash01(p.id + k) - 0.5) * 8);
+    return clamp(base + ((p.tb && p.tb[k]) || 0), 15, 99);
+  }
+  const TRAIN_INT = { light: ['Light', 0.55, 0], normal: ['Normal', 1, 0.0015], intense: ['Intense', 1.6, 0.006] };
+  const trainAgeF = (a) => (a <= 20 ? 1.6 : a <= 23 ? 1.25 : a <= 26 ? 1 : a <= 29 ? 0.7 : a <= 32 ? 0.45 : 0.3);
+  // Can this player retrain to `pos`? Keepers and outfielders cannot swap.
+  const canLearn = (p, pos) => pos !== p.pos && !(p.alt || []).includes(pos) && (pos === 'GK') === (p.pos === 'GK');
+  // Sessions needed to learn a position scale with how different it is.
+  const learnDist = (p, pos) => 1 + Math.max(0, -Math.max(fit(p.pos, pos), ...(p.alt || []).map((x) => fit(x, pos)))) / 6;
+  // One training session for the players you control (after every matchday your club plays).
+  function teamTraining() {
+    const c = C();
+    const [, mult, injRisk] = TRAIN_INT[c.trainInt || 'normal'];
+    const ids = isPlayerMode() ? [c.pid] : S.clubs[c.clubId].pids;
+    for (const id of ids) {
+      const p = S.players[id];
+      if (!p || !p.tf || p.inj > 0 || p.away) continue;
+      const mine = !isPlayerMode() || p.id === c.pid;
+      const rate = trainAgeF(p.age) * mult * (0.7 + rand() * 0.6);
+      if (p.tf === 'POS') {
+        const pos = p.tpos;
+        if (!pos || !canLearn(p, pos)) { p.tf = null; p.tpos = null; continue; }
+        p.fam = p.fam || {};
+        p.fam[pos] = Math.min(100, (p.fam[pos] || 0) + (5 * rate) / learnDist(p, pos));
+        if (p.fam[pos] >= 100) {
+          delete p.fam[pos]; if (!Object.keys(p.fam).length) p.fam = null;
+          (p.alt = p.alt || []).push(pos);
+          p.tf = null; p.tpos = null;
+          if (mine) news(`🔁 ${p.id === c.pid ? 'You have' : `${p.name} has`} learned to play ${pos}. ${p.id === c.pid ? 'You' : 'He'} can now play there without a penalty.`, 'good');
+        }
+      } else {
+        const k = p.tf, pr = APROF[PROF_OF[p.pos]][k];
+        if (!pr) { p.tf = null; continue; }
+        p.tb = p.tb || {};
+        if ((p.tb[k] || 0) >= 15 || attr(p, k) >= 99) continue;
+        p.tp = (p.tp || 0) + 0.1 * rate;
+        if (p.tp >= 1) {
+          p.tp -= 1;
+          p.tb[k] = (p.tb[k] || 0) + 1;
+          // Key attributes for his position lift his OVR (still limited by potential).
+          const room = p.pot - p.ovr;
+          p.xp = (p.xp || 0) + pr[1] * 8 * 0.6 * (room <= 0 ? 0 : room <= 2 ? 0.5 : 1);
+          levelUp(p, mine);
+          if (mine && p.tb[k] % 3 === 0) news(`🏋️ Training: ${p.id === c.pid ? 'your' : `${p.name}'s`} ${ATTR_NAME[k].toLowerCase()} has improved to ${attr(p, k)}.`, 'good');
+        }
+      }
+      if (injRisk && rand() < injRisk) { p.inj = randInt(1, 3); if (mine) news(`🤕 ${p.id === c.pid ? 'You were' : `${p.name} was`} injured in training and will miss ${p.inj} match${p.inj > 1 ? 'es' : ''}.`, 'bad'); }
+    }
+  }
+  // Make a learned position the player's main one.
+  function setMainPos(p, pos) {
+    if (!(p.alt || []).includes(pos)) return;
+    p.alt = p.alt.filter((x) => x !== pos).concat(p.pos);
+    // Attribute points trained for the old position don't all carry over.
+    if (p.tf && !APROF[PROF_OF[pos]][p.tf]) p.tf = null;
+    if (p.tb) for (const k of Object.keys(p.tb)) if (!APROF[PROF_OF[pos]][k]) delete p.tb[k];
+    p.pos = pos;
+    if (p.role && ROLE[p.role]?.group !== roleGroup(pos)) p.role = defaultRole(pos);
+    invalidate();
   }
 
   /* --- Playing matches --- */
@@ -1470,6 +1565,7 @@
       if (mine(pid)) news(`🟥 ${S.players[pid].name} is suspended for the next match.`, 'bad');
     }
     if (!isPlayerMode() && playedClubs.has(c.clubId)) academyTraining();
+    if (playedClubs.has(c.clubId)) teamTraining();
     if (windowInfo().open) { aiTransfers(randInt(1, 3)); maybeIncomingOffer(); }
     c.offers = c.offers.filter((o) => o.until > c.dayIdx && (isPlayerMode() || S.players[o.pid]?.clubId === c.clubId));
     c.dayIdx++;
@@ -2789,7 +2885,7 @@
   /* ------------------------------------------------------------------ *
    * Game shell
    * ------------------------------------------------------------------ */
-  const TABS = [['home', 'Home'], ['match', 'Match'], ['squad', 'Squad & Tactics'], ['transfers', 'Transfers'], ['academy', 'Academy'], ['fixtures', 'Fixtures'], ['comps', 'Competitions'], ['intl', 'International'], ['stats', 'Stats'], ['data', 'Data']];
+  const TABS = [['home', 'Home'], ['match', 'Match'], ['squad', 'Squad & Tactics'], ['training', 'Training'], ['transfers', 'Transfers'], ['academy', 'Academy'], ['fixtures', 'Fixtures'], ['comps', 'Competitions'], ['intl', 'International'], ['stats', 'Stats'], ['data', 'Data']];
   const TABS_PLAYER = [['home', 'Home'], ['match', 'Match'], ['career', 'My Career'], ['club', 'Club'], ['fixtures', 'Fixtures'], ['comps', 'Competitions'], ['intl', 'International'], ['stats', 'Stats'], ['data', 'Data']];
   function render() {
     if (!S || !S.career) return renderStart();
@@ -2827,6 +2923,7 @@
       case 'career': return viewCareer();
       case 'club': return viewClub();
       case 'academy': return viewAcademy();
+      case 'training': return viewTraining();
       case 'intl': return viewIntl();
       default: return isPlayerMode() ? viewHomePlayer() : viewHome();
     }
@@ -3395,6 +3492,15 @@
           ${c.history.length ? `<h4>Seasons</h4><ul class="plist">${c.history.map((h) => `<li>${seasonLabel(h.season)} · ${esc(h.club)} <span class="muted small">${esc(h.league || '')}, ${ordinal(h.pos)}</span><span class="ml-auto small">${h.me ? `${h.me.apps} apps, ${h.me.g} goals, OVR ${h.me.ovr0}→${h.me.ovr}` : ''}</span></li>`).join('')}</ul>` : ''}
         </section>
         <section class="card">
+          <h3>🏋️ Training</h3>
+          <p class="muted small">Pick what you work on after every match. Key attributes (★) for your position also raise your OVR. You can also learn a new position to become more versatile.</p>
+          <div class="row gap wrap">${posTags(p)} ${mainPosButtons(p)}</div>
+          ${attrChips(p)}
+          <div class="row gap wrap mt">${trainControls(p)}</div>
+          <div class="mt">${trainProgress(p)}</div>
+          <label class="inline mt">Intensity <select class="input sm" id="train-int" data-change="train-int">${Object.entries(TRAIN_INT).map(([k, [l]]) => `<option value="${k}" ${(c.trainInt || 'normal') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        </section>
+        <section class="card">
           <h3>Playing style</h3>
           <p class="muted small">How you play when you are on the pitch. It changes how often you shoot, create or head crosses, and the commentary.</p>
           <label class="inline">Player type <select class="input sm" id="my-role" data-change="my-role">${ROLE_GROUPS[roleGroup(p.pos)].map(([id, label]) => `<option value="${id}" ${p.role === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
@@ -3451,7 +3557,7 @@
       if (!p) return `<button class="chip empty ${ui.squadSel === i ? 'sel' : ''}" style="left:${x}%;top:${y}%" data-act="slot" data-id="${i}"><span class="chip-r">?</span><span class="chip-n">${pos}</span></button>`;
       const e = eff(p, pos);
       const cv = coverBy[i];
-      return `<button class="chip ${ui.squadSel === i ? 'sel' : ''} ${fit(p.pos, pos) < 0 ? 'oop' : ''} ${cv ? 'out' : ''}" style="left:${x}%;top:${y}%" data-act="slot" data-id="${i}" title="${esc(p.name)} (${p.pos}) playing ${pos}">
+      return `<button class="chip ${ui.squadSel === i ? 'sel' : ''} ${pfit(p, pos) < 0 ? 'oop' : ''} ${cv ? 'out' : ''}" style="left:${x}%;top:${y}%" data-act="slot" data-id="${i}" title="${esc(p.name)} (${p.pos}) playing ${pos}">
         <span class="chip-r ${ovrClass(e)}">${e}</span><span class="chip-n">${esc(p.name.split(' ').slice(-1)[0])}</span><span class="chip-p">${cv ? unavailWhy(p).split(' ')[0].toUpperCase() : `${pos} · ${c.roles[i].toUpperCase()}`}</span>
         ${cv && cv.in ? `<span class="chip-cover">↳ ${esc(S.players[cv.in].name.split(' ').slice(-1)[0])}</span>` : ''}</button>`;
     }).join('');
@@ -3496,7 +3602,7 @@
             <td>${posBadge(p.pos)}</td>
             <td class="left name-cell">${lineupSet.has(p.id) ? '<span class="xi-dot" title="In your XI"></span>' : ''}${selPos ? esc(p.name) : playerLink(p)} ${statusIcons(p)} ${genTag(p)}</td>
             <td>${p.age}</td><td>${ovrBadge(p.ovr)}${delta(p)}</td><td>${potBadge(p)}</td>
-            ${selPos ? `<td><strong class="${fit(p.pos, selPos) < 0 ? 'warn-t' : ''}">${eff(p, selPos)}</strong></td>` : ''}
+            ${selPos ? `<td><strong class="${pfit(p, selPos) < 0 ? 'warn-t' : ''}">${eff(p, selPos)}</strong></td>` : ''}
             <td>${formArrow(p.form)}</td><td>${p.st.apps}</td><td>${p.st.goals}</td><td>${p.st.assists}</td><td>${p.st.apps ? avgRating(p).toFixed(2) : '-'}</td>
             <td class="money">${money(playerValue(p))}</td><td class="money muted">${money(p.wage)}</td>
             <td class="${expiring(p) ? 'warn-t' : 'muted'} small">${contractLabel(p)}</td>
@@ -3899,6 +4005,57 @@
         </tbody></table></div></section>
       </div>`;
   }
+  /* --- Training UI --- */
+  function attrChips(p) {
+    const prof = APROF[PROF_OF[p.pos]];
+    return `<div class="attrs">${attrKeys(p).map((k) => { const v = attr(p, k), tb = (p.tb && p.tb[k]) || 0; return `<span class="at ${prof[k][1] >= 0.25 ? 'key' : ''} ${p.tf === k ? 'focus' : ''}" title="${ATTR_NAME[k]}${prof[k][1] >= 0.25 ? ' (key attribute for his position)' : ''}${tb ? ` · +${tb} from training` : ''}"><i>${k}</i><b class="${ovrClass(v)}">${v}</b>${tb ? `<sup>+${tb}</sup>` : ''}</span>`; }).join('')}</div>`;
+  }
+  const posTags = (p) => `${posBadge(p.pos)}${(p.alt || []).map((x) => `<span class="pos alt pos-${LINE[x] || 'MID'}" title="Learned position">${x}</span>`).join('')}`;
+  function trainControls(p) {
+    const prof = APROF[PROF_OF[p.pos]];
+    const learnable = POSITIONS.filter((x) => canLearn(p, x)).sort((a, b) => learnDist(p, a) - learnDist(p, b));
+    const focus = `<select class="input sm" id="tf-${p.id}" data-change="train-focus" data-pid="${p.id}">
+      <option value="">No focus (rest)</option>
+      <optgroup label="Improve an attribute">${attrKeys(p).map((k) => `<option value="${k}" ${p.tf === k ? 'selected' : ''}>${ATTR_NAME[k]}${prof[k][1] >= 0.25 ? ' ★' : ''}</option>`).join('')}</optgroup>
+      ${learnable.length ? `<option value="POS" ${p.tf === 'POS' ? 'selected' : ''}>Learn a new position…</option>` : ''}
+    </select>`;
+    const posSel = p.tf === 'POS' ? ` <select class="input sm" id="tpos-${p.id}" data-change="train-pos" data-pid="${p.id}">${learnable.map((x) => `<option ${p.tpos === x ? 'selected' : ''}>${x}</option>`).join('')}</select>` : '';
+    return focus + posSel;
+  }
+  function trainProgress(p) {
+    if (p.tf === 'POS' && p.tpos) {
+      const f = (p.fam && p.fam[p.tpos]) || 0;
+      return `<div class="small muted">Learning ${p.tpos}: ${Math.floor(f)}% · ~${Math.ceil((100 - f) / (5 * trainAgeF(p.age) / learnDist(p, p.tpos)))} sessions</div><div class="small-bar"><i style="width:${f}%"></i></div>`;
+    }
+    if (p.tf) {
+      const maxed = ((p.tb && p.tb[p.tf]) || 0) >= 15 || attr(p, p.tf) >= 99;
+      return maxed ? '<div class="small muted">Maxed out: pick another focus</div>' : `<div class="small muted">Next ${ATTR_NAME[p.tf].toLowerCase()} point</div><div class="small-bar"><i style="width:${clamp(p.tp || 0, 0, 1) * 100}%"></i></div>`;
+    }
+    return '<span class="muted small">Resting</span>';
+  }
+  const mainPosButtons = (p) => (p.alt || []).map((x) => `<button class="btn xs ghost" data-act="main-pos" data-id="${p.id}|${x}" title="Make ${x} his main position">Main: ${x}</button>`).join(' ');
+  // Re-render whatever view the training controls live in.
+  function rerenderTraining(p) {
+    if ($('.pmodal')) playerModal(p.id); else render();
+  }
+  function viewTraining() {
+    const c = C(), club = S.clubs[c.clubId];
+    const players = club.pids.map((id) => S.players[id]).sort((a, b) => POS_ORDER[a.pos] - POS_ORDER[b.pos] || b.ovr - a.ovr);
+    const n = players.filter((p) => p.tf).length;
+    return `
+      <section class="card">
+        <div class="row between wrap gap">
+          <h3>🏋️ Training</h3>
+          <label class="inline">Intensity <select class="input sm" id="train-int" data-change="train-int">${Object.entries(TRAIN_INT).map(([k, [l]]) => `<option value="${k}" ${(c.trainInt || 'normal') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        </div>
+        <p class="muted small">Give each player a training focus. After every match your club plays, players with a focus train it: young players improve fastest. Improving a key attribute (★) for his position also raises his OVR, up to his potential. Trained shooting, heading (physical) and keeping directly help in matches. <strong>Learn a new position</strong> to play him there without the out-of-position penalty: he gets better there as he learns it, and similar positions take less time. Intense training is faster but players can get injured. ${n} of ${players.length} players have a focus.</p>
+        <div class="tbl-wrap"><table class="tbl train-tbl"><thead><tr><th>Pos</th><th class="left">Name</th><th>Age</th><th>OVR</th><th>POT</th><th class="left">Attributes</th><th class="left">Focus</th><th class="left">Progress</th></tr></thead><tbody>
+        ${players.map((p) => `<tr class="${!available(p) ? 'unavail' : ''}"><td class="nowrap">${posTags(p)}</td><td class="left">${playerLink(p)} ${statusIcons(p)}${p.alt && p.alt.length ? `<div>${mainPosButtons(p)}</div>` : ''}</td><td>${p.age}</td><td>${ovrBadge(p.ovr)}${delta(p)}</td><td>${potBadge(p)}</td>
+          <td class="left">${attrChips(p)}</td><td class="left nowrap">${trainControls(p)}</td><td class="left train-prog">${trainProgress(p)}</td></tr>`).join('')}
+        </tbody></table></div>
+      </section>`;
+  }
+
   function viewAcademy() {
     const c = C(), a = academy();
     const youth = S.clubs.YTH.pids.map((id) => S.players[id]).filter(Boolean).sort((x, y) => y.pot - x.pot);
@@ -4059,6 +4216,10 @@
           <div class="big-stat"><span>Avg rating</span><strong>${p.st.apps ? avgRating(p).toFixed(2) : '-'}</strong></div>
         </div>
         ${inCareer ? `<div class="xp"><span class="muted small">Progress to next OVR change</span><div class="xpbar"><i class="${(p.xp || 0) < 0 ? 'neg' : ''}" style="width:${clamp(Math.abs(p.xp || 0) / 8, 0, 1) * 100}%"></i></div></div>` : ''}
+        <h4>Attributes</h4>
+        ${attrChips(p)}
+        ${p.alt && p.alt.length ? `<p class="small">Also plays: ${p.alt.map((x) => posBadge(x)).join(' ')}</p>` : ''}
+        ${inCareer && (mine && !isPlayerMode() || p.id === C().pid) ? `<div class="row gap wrap mt"><span class="muted small">Training</span> ${trainControls(p)}</div><div class="mt">${trainProgress(p)}</div>` : ''}
         <h4>Career</h4>
         ${careerTableHtml(p, inCareer)}
         <h4>Rating by position</h4>
@@ -4187,6 +4348,10 @@
     sell: (id) => sellModal(id),
     'refresh-offers': (id) => sellModal(id),
     loan: (id) => loanModal(id),
+    'main-pos': (id) => {
+      const [pid, pos] = id.split('|'); const p = S.players[pid];
+      askConfirm(`Make ${pos} ${p.id === C().pid ? 'your' : `${p.name}'s`} main position? ${p.pos} stays as a learned position. Attribute training that doesn't apply to ${pos} is lost.`, () => { setMainPos(p, pos); save(); closeModal(); render(); }, 'Switch');
+    },
     'accept-loan': (i) => { const lo = ui.loanOffers; const o = lo && lo.offers[+i]; if (!o) return; loanPlayer(lo.pid, o); closeModal(); render(); },
     recall: (id) => askConfirm(`Recall ${S.players[id].name} from his loan at ${clubName(S.players[id].clubId)}?`, () => { recallLoan(id); closeModal(); render(); }, 'Recall'),
     'accept-sale': (i) => { const so = ui.sellOffers; const o = so && so.offers[+i]; if (!o) return; sellPlayer(so.pid, o.clubId, o.amount); closeModal(); render(); },
@@ -4312,6 +4477,14 @@
     'my-role': (v) => { me().role = v; save(); render(); toast(`You now play as a ${ROLE[v].label.toLowerCase()}.`, 'good'); },
     'start-role': (v) => { ui.startRole = v; },
     'start-nat': (v) => { ui.startNat = v; },
+    'train-int': (v) => { C().trainInt = v; save(); render(); },
+    'train-focus': (v, el) => {
+      const p = S.players[el.dataset.pid];
+      p.tf = v || null; p.tp = 0;
+      if (v === 'POS') { p.tpos = POSITIONS.filter((x) => canLearn(p, x)).sort((a, b) => learnDist(p, a) - learnDist(p, b))[0] || null; if (!p.tpos) p.tf = null; } else p.tpos = null;
+      save(); rerenderTraining(p);
+    },
+    'train-pos': (v, el) => { const p = S.players[el.dataset.pid]; p.tpos = v; save(); rerenderTraining(p); },
     'start-pos': (v) => { ui.startPos = v; ui.startRole = null; ui.managerName = $('#mgr-name')?.value || ui.managerName; renderStart(); },
     speed: (v) => { C().speed = v; save(); if (!ui.playback) render(); else if (v === 'instant') finishPlayback(); },
     'fix-filter': (v) => { ui.fixFilter = v; ui.fixDay = null; render(); },
