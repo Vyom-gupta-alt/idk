@@ -329,6 +329,12 @@
       const bs = new T.Mesh(new T.CircleGeometry(0.3, 12), shadowMat); bs.rotation.x = -Math.PI / 2; bs.position.y = 0.021; scene.add(bs); this.ballShadow = bs;
       const ring = new T.Mesh(new T.RingGeometry(0.6, 0.85, 24), new T.MeshBasicMaterial({ color: 0xfacc15, side: T.DoubleSide }));
       ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03; scene.add(ring); this.ring = ring;
+      // Mouse aim marker and the team-mate a click would pass to.
+      const aimM = new T.Mesh(new T.RingGeometry(0.35, 0.55, 28), new T.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, side: T.DoubleSide, depthWrite: false }));
+      aimM.rotation.x = -Math.PI / 2; aimM.position.y = 0.035; aimM.visible = false; scene.add(aimM); this.aimMark = aimM;
+      const tgt = new T.Mesh(new T.RingGeometry(0.62, 0.8, 28), new T.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.85, side: T.DoubleSide, depthWrite: false }));
+      tgt.rotation.x = -Math.PI / 2; tgt.position.y = 0.032; tgt.visible = false; scene.add(tgt); this.tgtMark = tgt;
+      this.ray = new T.Raycaster(); this.ground = new T.Plane(new T.Vector3(0, 1, 0), 0); this.aimV = new T.Vector3();
       const arrow = new T.Mesh(new T.ConeGeometry(0.22, 0.45, 8), new T.MeshBasicMaterial({ color: 0xfacc15 }));
       arrow.rotation.x = Math.PI; scene.add(arrow); this.arrow = arrow;
       this.nameTag = this.makeLabel();
@@ -383,9 +389,7 @@
       const q = (s) => this.root.querySelector(s);
       q('.m3d-t0').innerHTML = `<i style="background:${cols[0].css}"></i>${esc(t[0].short || t[0].name)}`;
       q('.m3d-t1').innerHTML = `${esc(t[1].short || t[1].name)}<i style="background:${cols[1].css}"></i>`;
-      q('.m3d-keys').innerHTML = this.teamMode
-        ? '<b>WASD</b> move · <b>Shift</b> sprint · <b>Space</b> shoot / tackle · <b>F</b> finesse · <b>X</b> skill move / slide · <b>E</b> pass · <b>Q</b> through / switch · <b>R</b> lob · <b>C</b> camera · <b>Esc</b> pause'
-        : '<b>WASD</b> move · <b>Shift</b> sprint · <b>Space</b> shoot / tackle · <b>F</b> finesse · <b>X</b> skill move / slide · <b>E</b> pass / call · <b>Q</b> through · <b>R</b> lob · <b>C</b> camera · <b>Esc</b> pause';
+      q('.m3d-keys').innerHTML = '🖱️ <b>hold L</b> dribble · <b>click L</b> ' + (this.teamMode ? 'pass / switch' : 'pass / call') + ' · <b>hold R</b>/<b>Shift</b> sprint · <b>WASD</b> move · <b>Space</b> shoot / tackle · <b>F</b> finesse · <b>X</b> skill / slide · <b>E Q R</b> pass / through / lob · <b>C</b> cam · <b>Esc</b>';
       this.hud = { pname: q('.m3d-pname'), ps: q('.m3d-ps'), sta: q('.m3d-sta i'), sc: q('.m3d-sc'), clock: q('.m3d-clock'), msg: q('.m3d-msg'), power: q('.m3d-power'), bar: q('.m3d-power i'), radar: q('.m3d-radar'), menu: q('.m3d-menu') };
       this.cols = cols;
     }
@@ -398,7 +402,7 @@
         this.keys[k] = true;
       };
       this.ku = (e) => { const k = e.key.length === 1 ? e.key.toLowerCase() : e.key; this.keys[k] = false; };
-      this.blur = () => { this.keys = {}; if (!this.paused && !this.over) this.showMenu('pause'); };
+      this.blur = () => { this.keys = {}; if (this.mouse) { this.mouse.left = this.mouse.right = false; } if (!this.paused && !this.over) this.showMenu('pause'); };
       window.addEventListener('keydown', this.kd);
       window.addEventListener('keyup', this.ku);
       window.addEventListener('blur', this.blur);
@@ -410,14 +414,29 @@
         else if (a === 'done') this.finish();
       };
       this.root.addEventListener('click', this.click);
+      // Mouse: the cursor aims; hold left to run/dribble towards it, click left to pass, hold right to sprint.
+      this.mouse = { nx: 0, ny: 0, on: false, left: false, right: false, hold: 0, clicks: 0 };
+      const cv = this.renderer.domElement;
+      cv.style.cursor = 'crosshair';
+      const pos = (e) => { const r = cv.getBoundingClientRect(); this.mouse.nx = ((e.clientX - r.left) / r.width) * 2 - 1; this.mouse.ny = -((e.clientY - r.top) / r.height) * 2 + 1; this.mouse.on = true; };
+      this.mm = (e) => pos(e);
+      this.md = (e) => { if (this.paused || e.target !== cv) return; pos(e); if (e.button === 0) { this.mouse.left = true; this.mouse.hold = 0; } if (e.button === 2) this.mouse.right = true; e.preventDefault(); };
+      this.mu = (e) => {
+        if (e.button === 0 && this.mouse.left) { this.mouse.left = false; if (this.mouse.hold < 0.2 && !this.paused) this.mouse.clicks++; }
+        if (e.button === 2) this.mouse.right = false;
+      };
+      this.cm = (e) => e.preventDefault();
+      cv.addEventListener('mousemove', this.mm); cv.addEventListener('mousedown', this.md);
+      window.addEventListener('mouseup', this.mu); this.root.addEventListener('contextmenu', this.cm);
+      cv.addEventListener('mouseleave', () => { this.mouse.on = false; });
     }
     showMenu(kind) {
       this.paused = true;
       const m = this.hud.menu;
       m.classList.remove('hidden');
       const help = `<ul class="m3d-help">${this.teamMode
-        ? '<li><b>W A S D</b> or arrows: move · <b>Shift</b>: sprint (uses stamina, and you knock the ball further ahead)</li><li><b>Space</b>: hold for a power shot, release to shoot (W/S aims) · <b>F</b>: curled finesse shot · without the ball <b>Space</b> is a standing tackle</li><li><b>X</b>: skill move with the ball (side-step a defender) · slide tackle without it (fouls and cards!)</li><li><b>E</b>: pass · <b>Q</b>: through ball, or switch player when defending · <b>R</b>: lofted pass / cross</li><li>Offside is called when a pass reaches a team-mate who was beyond the last defender.</li>'
-        : '<li><b>W A S D</b> or arrows: move · <b>Shift</b>: sprint (uses stamina). You only control yourself.</li><li><b>Space</b>: hold for a power shot · <b>F</b>: finesse shot · without the ball <b>Space</b> tackles</li><li><b>X</b>: skill move with the ball, slide tackle without it</li><li><b>E</b>: pass, or call for the ball · <b>Q</b>: through ball · <b>R</b>: lofted pass / cross</li><li>Stay onside: time your runs with the last defender.</li>'}</ul>`;
+        ? '<li>🖱️ <b>Mouse:</b> the cursor aims. <b>Hold left</b> to run / dribble towards it, <b>click left</b> to pass to the team-mate nearest the cursor (or into space there), <b>hold right</b> to sprint. Space shoots at the part of the goal you point at.</li><li><b>W A S D</b> or arrows: move · <b>Shift</b>: sprint (uses stamina, and you knock the ball further ahead)</li><li><b>Space</b>: hold for a power shot, release to shoot (W/S aims) · <b>F</b>: curled finesse shot · without the ball <b>Space</b> is a standing tackle</li><li><b>X</b>: skill move with the ball (side-step a defender) · slide tackle without it (fouls and cards!)</li><li><b>E</b>: pass · <b>Q</b>: through ball, or switch player when defending · <b>R</b>: lofted pass / cross</li><li>Offside is called when a pass reaches a team-mate who was beyond the last defender.</li>'
+        : '<li>🖱️ <b>Mouse:</b> <b>hold left</b> to run / dribble towards the cursor, <b>click left</b> to pass there (or call for the ball), <b>hold right</b> to sprint. Space shoots where you point.</li><li><b>W A S D</b> or arrows: move · <b>Shift</b>: sprint (uses stamina). You only control yourself.</li><li><b>Space</b>: hold for a power shot · <b>F</b>: finesse shot · without the ball <b>Space</b> tackles</li><li><b>X</b>: skill move with the ball, slide tackle without it</li><li><b>E</b>: pass, or call for the ball · <b>Q</b>: through ball · <b>R</b>: lofted pass / cross</li><li>Stay onside: time your runs with the last defender.</li>'}</ul>`;
       if (kind === 'start') m.innerHTML = `<h2>${esc(this.cfg.teams[0].name)} v ${esc(this.cfg.teams[1].name)}</h2><p class="muted">${esc(this.cfg.compName || '')} · ${this.cfg.minutes} minute match · you attack to the right →</p>${help}<button class="btn primary big" data-m3d="resume">Kick off</button>`;
       else m.innerHTML = `<h2>Paused</h2><p>${this.score[0]} - ${this.score[1]} · ${this.minute()}'</p>${help}<div class="row gap"><button class="btn primary" data-m3d="resume">Resume</button><button class="btn ghost" data-m3d="finish">End match now (keep this score)</button></div>`;
     }
@@ -538,6 +557,21 @@
         if (sc > bs) { bs = sc; best = m; }
       }
       return best;
+    }
+    mateNear(side, pt, maxD, excl) {
+      let best = null, bd = maxD;
+      for (const q of this.players) { if (q.side !== side || q === excl || q.isGK) continue; const d = hyp(q.x - pt.x, q.z - pt.z); if (d < bd) { bd = d; best = q; } }
+      return best;
+    }
+    mousePass(p, aim) {
+      const m = this.mateNear(p.side, aim, 7, p);
+      const b = this.ball;
+      if (m) return this.doPass(p, m, hyp(m.x - p.x, m.z - p.z) > 32 ? 'lob' : 'ground');
+      // Into space: whoever is closest to the spot runs onto it.
+      const d = hyp(aim.x - b.x, aim.z - b.z), runner = this.mateNear(p.side, aim, 25, p);
+      const psk = d > 32 ? p.ps.longball : p.ps.incisive;
+      this.kickTo(p, aim.x, aim.z, d > 32 ? 30 : clamp(9 + d * 0.55, 10, 26), d > 32, ((1 - p.pas / 100) * (d > 32 ? 0.12 : 0.08) + 0.01) * (1 - (psk || 0) * 0.22));
+      b.pass = { pid: p.pid, side: p.side, to: runner, t: this.t, off: runner && this.isOffside(runner) ? runner : null };
     }
     doPass(p, m, kind) {
       const b = this.ball;
@@ -781,9 +815,24 @@
     user(dt) {
       const p = this.ctrl, b = this.ball;
       if (!p || p.isGK) { this.prev = { ...this.keys }; return; }
-      const { ix, iz } = this.input();
-      const sprint = !!this.keys.Shift && !!(ix || iz);
+      let { ix, iz } = this.input();
+      const ms = this.mouse, aim = this.aim;
+      if (ms.left) ms.hold += dt;
+      // Hold the left button: run / dribble towards the cursor (keys take priority).
+      if (!ix && !iz && ms.left && ms.hold >= 0.2 && aim) {
+        const dx = aim.x - p.x, dz = aim.z - p.z, dd = hyp(dx, dz);
+        if (dd > 0.7) { ix = dx / dd; iz = dz / dd; }
+      }
+      const sprint = (!!this.keys.Shift || ms.right) && !!(ix || iz);
       const has = b.owner === p;
+      // Left click: pass to the team-mate nearest the cursor (or into space there); without the ball, switch player / call for it.
+      while (ms.clicks > 0) {
+        ms.clicks--;
+        if (!aim) break;
+        if (has) { this.mousePass(p, aim); this.prev = { ...this.keys }; return; }
+        if (this.teamMode) { const m = this.mateNear(p.side, aim, 12, null); if (m) this.ctrl = m; }
+        else if (b.owner && b.owner.side === p.side) { this.called = p; this.calledT = this.t; this.flash('Calling for the ball!', 0.8); }
+      }
       p.spr = sprint;
       const sp = p.spd * (sprint ? this.sprintMul(p) : 1) * (has ? 0.93 : 1) * (p.stun > 0 ? 0.25 : 1);
       this.accel(p, ix * sp, iz * sp, dt);
@@ -792,13 +841,15 @@
         if (has && p.skillT <= 0) this.skillMove(p, ix, iz);
         else if (!has && p.slideT <= 0 && p.stun <= 0) this.slide(p);
       }
-      if (has && this.pressed('f')) { this.finesse(p, iz); this.charge = -1; this.prev = { ...this.keys }; return; }
+      const aimShot = () => (this.input().iz ? null : aim && Math.abs(aim.x - this.goalX(p.side)) < 30 ? clamp(aim.z, -2.9, 2.9) : null);
+      if (has && this.pressed('f')) { const az = aimShot(); this.finesse(p, this.input().iz || (az != null ? Math.sign(az) || 1 : 0)); this.charge = -1; this.prev = { ...this.keys }; return; }
       if (ix || iz) p.face = Math.atan2(iz, ix);
       const fdx = ix || Math.cos(p.face), fdz = iz || Math.sin(p.face);
       // Shooting: hold space to charge.
       if (has && this.keys[' ']) { this.charge = this.charge < 0 ? 0 : Math.min(1.15, this.charge + dt * 1.1); }
       else if (has && this.charge >= 0 && !this.keys[' ']) {
-        const aim = iz ? iz * 2.9 : null;
+        const aimK = this.input().iz, az = aimShot();
+        const aim = aimK ? aimK * 2.9 : az;
         this.shoot(p, Math.min(1, this.charge), aim); this.charge = -1;
       } else if (!has) {
         this.charge = -1;
@@ -826,6 +877,7 @@
       if (this.phase === 'dead') {
         this.deadT -= dt;
         for (const p of this.players) { p.sta = Math.min(100, p.sta + 2 * dt); p.slideT = 0; }
+        if (this.mouse) this.mouse.clicks = 0;
         for (const p of this.players) { p.vx *= 0.8; p.vz *= 0.8; }
         if (this.deadT <= 0) { if (this.after) { const f = this.after; this.after = null; f(); } else this.phase = 'play'; }
         this.stepBall(dt, true);
@@ -1025,6 +1077,7 @@
       cancelAnimationFrame(this.raf);
       window.removeEventListener('keydown', this.kd); window.removeEventListener('keyup', this.ku);
       window.removeEventListener('blur', this.blur); window.removeEventListener('resize', this.resize);
+      window.removeEventListener('mouseup', this.mu);
       clearTimeout(this.msgT);
       this.renderer.dispose();
       this.root.remove();
@@ -1080,6 +1133,19 @@
       this.cz = (this.cz ?? tz) + (tz - (this.cz ?? tz)) * k;
       cam.position.set(this.cx, mode.h, this.cz + mode.d);
       cam.lookAt(this.cx, mode.ly, this.cz - 2);
+      // Mouse aim on the pitch.
+      if (this.mouse && this.mouse.on && !this.over) {
+        this.ray.setFromCamera({ x: this.mouse.nx, y: this.mouse.ny }, cam);
+        const hit = this.ray.ray.intersectPlane(this.ground, this.aimV);
+        this.aim = hit ? { x: clamp(hit.x, -PL - 1, PL + 1), z: clamp(hit.z, -PW - 1, PW + 1) } : null;
+      } else this.aim = null;
+      const a = this.aim;
+      this.aimMark.visible = !!a;
+      if (a) this.aimMark.position.set(a.x, 0.035, a.z);
+      const has = this.ctrl && this.ball.owner === this.ctrl;
+      const tm = a && this.ctrl ? (has ? this.mateNear(this.ctrl.side, a, 7, this.ctrl) : this.teamMode ? this.mateNear(this.ctrl.side, a, 12, this.ctrl) : null) : null;
+      this.tgtMark.visible = !!tm;
+      if (tm) this.tgtMark.position.set(tm.x, 0.032, tm.z);
       this.renderer.render(this.scene, cam);
       // HUD
       this.hud.sc.textContent = `${this.score[0]} - ${this.score[1]}`;
