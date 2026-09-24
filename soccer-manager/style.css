@@ -457,3 +457,13 @@ label.check { display: inline-flex; align-items: center; gap: .4rem; font-size: 
 .z-promo { box-shadow: inset 3px 0 0 var(--accent); }
 .legend .z-promo { background: var(--accent); }
 .tbl tr.total td { border-top: 2px solid var(--line); }
+
+/* ---- Tactics, roles & contracts (v4) ---- */
+.style-desc { margin: .4rem 0 0; }
+.roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: .3rem .8rem; margin-bottom: .5rem; }
+.role-row { display: flex; align-items: center; gap: .4rem; min-width: 0; }
+.role-row .role-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .85rem; }
+.role-row select { max-width: 60%; }
+.nowrap { white-space: nowrap; }
+.terms { border-top: 1px solid var(--line); margin-top: .8rem; padding-top: .4rem; }
+.p-offer .notice { margin: .4rem 0 0; }

@@ -43,7 +43,8 @@
     v = Math.abs(v);
     if (v >= 1e9) return `${s}€${(v / 1e9).toFixed(2)}B`;
     if (v >= 1e6) return `${s}€${(v / 1e6).toFixed(v >= 1e8 ? 0 : 1)}M`;
-    if (v >= 1e3) return `${s}€${Math.round(v / 1e3)}K`;
+    if (v >= 1e4) return `${s}€${Math.round(v / 1e3)}K`;
+    if (v >= 1e3) return `${s}€${+(v / 1e3).toFixed(1)}K`;
     return `${s}€${Math.round(v)}`;
   }
   function niceRound(v) {
@@ -118,6 +119,40 @@
     attacking: { label: 'Attacking', att: 2.5, def: -2.5, poss: 0.02 },
     allout: { label: 'All-out attack', att: 4.5, def: -5, poss: 0.03 },
   };
+  // Team play styles (on top of mentality). Effects are applied in sideStrength() and the match engine.
+  const STYLES = {
+    balanced: { label: 'Balanced', desc: 'No special instructions. The team adapts to the game.' },
+    tiki: { label: 'Tiki-taka', desc: 'Short passing and patience: much more possession, fewer but better chances. Works best with a strong midfield.', ctrl: 3, def: 0.5, rate: 0.9, shot: 0.08, goal: 0.03 },
+    gegen: { label: 'Gegenpress', desc: 'Win the ball back high up the pitch: the opponent attacks less, you attack more, but you pick up more cards and leave space behind.', ctrl: 1.5, att: 1, def: -1.8, rate: 1.05, oppRate: 0.9, cards: 1.4 },
+    counter: { label: 'Counter-attack', desc: 'Sit deep and break fast: less possession but dangerous chances when you win it back.', ctrl: -3, def: 2.5, rate: 0.85, shot: 0.12, goal: 0.06 },
+    longball: { label: 'Long ball', desc: 'Go direct: lots of attacks of lower quality, and many more headers for tall strikers.', ctrl: -2, rate: 1.15, shot: -0.05, goal: -0.02, cross: 0.12 },
+    wing: { label: 'Wing play', desc: 'Stretch the pitch and cross: wingers and full-backs create more, and strikers and centre-backs head goals.', rate: 1.05, cross: 0.1, wide: 1.5 },
+    bus: { label: 'Park the bus', desc: 'Everyone behind the ball: very hard to break down, very little going forward.', ctrl: -3, att: -3, def: 5, rate: 0.75, oppShot: -0.12 },
+  };
+  // Player roles per position group. att/mid/def add to the team's lines; shoot/assist/head scale who takes shots,
+  // creates and heads goals; cross adds crossing chances; card changes bookings.
+  const ROLE_GROUPS = {
+    GK: [['gk', 'Goalkeeper', {}], ['sk', 'Sweeper keeper', { def: 0.3, mid: 0.3 }]],
+    CB: [['cd', 'Central defender', {}], ['bpd', 'Ball-playing defender', { mid: 0.5, def: -0.2 }], ['stp', 'Stopper', { def: 0.5, mid: -0.2, card: 1.3 }]],
+    FB: [['fb', 'Full-back', {}], ['wb', 'Wing-back', { att: 0.3, assist: 1.5, cross: 0.4, def: -0.3 }], ['ifb', 'Inverted full-back', { mid: 0.5, def: 0.1, assist: 0.9 }], ['dfb', 'Defensive full-back', { def: 0.5, att: -0.2, assist: 0.7 }]],
+    DM: [['hm', 'Holding midfielder', { def: 0.6, att: -0.2, shoot: 0.6 }], ['dlp', 'Deep-lying playmaker', { mid: 0.6, assist: 1.4, def: -0.1 }], ['bwm', 'Ball-winning midfielder', { def: 0.5, mid: 0.1, card: 1.4 }], ['anc', 'Anchor', { def: 0.8, att: -0.3, shoot: 0.4 }]],
+    CM: [['b2b', 'Box-to-box', { att: 0.25, def: 0.25, shoot: 1.3 }], ['pm', 'Playmaker', { mid: 0.6, assist: 1.5, shoot: 0.8 }], ['mez', 'Mezzala', { att: 0.5, shoot: 1.5, def: -0.3 }], ['bwc', 'Ball-winning midfielder', { def: 0.5, card: 1.4, assist: 0.8 }], ['cm', 'Central midfielder', {}]],
+    AM: [['ap', 'Advanced playmaker', { mid: 0.4, assist: 1.6 }], ['ss', 'Shadow striker', { att: 0.6, shoot: 1.7, assist: 0.8 }], ['cam', 'Attacking midfielder', {}]],
+    W: [['w', 'Winger', { assist: 1.3, cross: 0.3 }], ['if', 'Inside forward (cuts in)', { att: 0.5, shoot: 1.7, assist: 0.8 }], ['cw', 'Cross specialist', { assist: 1.8, cross: 0.8, shoot: 0.7 }], ['wp', 'Wide playmaker', { mid: 0.4, assist: 1.5, shoot: 0.8 }], ['spd', 'Speedster (in behind)', { att: 0.4, shoot: 1.3 }]],
+    ST: [['af', 'Advanced forward', { att: 0.3 }], ['poa', 'Poacher', { att: 0.3, shoot: 1.5, assist: 0.6, def: -0.1 }], ['tm', 'Target man', { head: 2.3, assist: 1.1, mid: -0.1 }], ['f9', 'False 9', { mid: 0.6, assist: 1.6, shoot: 0.8 }], ['pf', 'Pressing forward', { def: 0.3, att: 0.1, card: 1.2 }], ['cf', 'Complete forward', { att: 0.2, mid: 0.2, head: 1.4 }]],
+  };
+  const ROLE = {};
+  for (const [g, list] of Object.entries(ROLE_GROUPS)) for (const [id, label, fx] of list) ROLE[id] = { id, label, fx, group: g };
+  const roleGroup = (slot) => ({ GK: 'GK', CB: 'CB', LB: 'FB', RB: 'FB', LWB: 'FB', RWB: 'FB', CDM: 'DM', CM: 'CM', CAM: 'AM', LM: 'W', RM: 'W', LW: 'W', RW: 'W', ST: 'ST' }[slot] || 'CM');
+  const defaultRole = (slot) => ROLE_GROUPS[roleGroup(slot)][0][0];
+  // A player's own preferred type (player career) is used whenever he plays in a matching position.
+  const roleFor = (p, slot, chosen) => (p && p.role && ROLE[p.role]?.group === roleGroup(slot) ? p.role : chosen && ROLE[chosen]?.group === roleGroup(slot) ? chosen : defaultRole(slot));
+  function clubStyle(club) {
+    if (club.style) return club.style;
+    const r = clubRating(club.id), h = [...club.id].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) % 997, 3) / 997;
+    const opts = r >= 80 ? ['tiki', 'gegen', 'balanced', 'wing'] : r >= 72 ? ['balanced', 'counter', 'wing', 'gegen'] : ['counter', 'longball', 'balanced', 'bus'];
+    return (club.style = opts[Math.floor(h * opts.length)]);
+  }
   const LEAGUE_MONEY = { ENG: 1.6, ESP: 1.15, ITA: 1.1, GER: 1.15, FRA: 0.9, POR: 0.5, NED: 0.5, ENG2: 0.45, ESP2: 0.25, ITA2: 0.25, GER2: 0.3, FRA2: 0.2, POR2: 0.1, NED2: 0.1 };
   const PROMOTED = 3; // clubs promoted and relegated between each pair of divisions
 
@@ -143,6 +178,8 @@
     for (const k of ['apps', 'goals', 'assists', 'yc', 'rc', 'rsum', 'motm', 'cs']) if (p.st[k] == null) p.st[k] = 0;
     for (const k of ['inj', 'sus', 'form']) if (p[k] == null) p[k] = 0;
     if (p.gen == null) p.gen = false;
+    // Contract runs until the end of season `contract` (e.g. 2027 = June 2028).
+    if (p.contract == null) p.contract = 2025 + (p.age <= 23 ? randInt(2, 5) : p.age >= 31 ? randInt(0, 2) : randInt(1, 4));
     if (p.pot == null) p.pot = genPot(p.ovr, p.age);
     if (p.xp == null) p.xp = 0;
     if (!p.wage) p.wage = wageFor(p);
@@ -343,6 +380,15 @@
     second: ['Second yellow for {p}! {t} are down to {n} men!'],
     red: ['RED CARD! {p} is sent off for a reckless lunge! {t} down to {n}.'],
     injury: ['{p} goes down injured and can\'t continue. {s} comes on.', 'Bad news for {t}: {p} is hurt and replaced by {s}.'],
+    r_if: ['GOAL! {p} cuts inside onto his stronger foot and curls it into the far corner!', 'GOAL! {p} drifts in off the wing and bends one past {gk}!'],
+    r_poa: ['GOAL! {p} is in the right place at the right time: a simple tap-in!', 'GOAL! {p} pounces on the loose ball six yards out!'],
+    r_tm: ['GOAL! {p} wins the aerial duel and heads it in!', 'GOAL! {p} holds off his marker and smashes it home!'],
+    r_ss: ['GOAL! {p} arrives late in the box, unmarked, and finishes!'],
+    r_mez: ['GOAL! {p} bursts forward from midfield and fires in!'],
+    r_b2b: ['GOAL! {p} gallops box to box and finishes off the move!'],
+    r_f9: ['GOAL! {p} drops deep, plays a one-two and dinks it over {gk}!'],
+    r_spd: ['GOAL! {p} runs in behind the defence and slots it past {gk}!'],
+    r_wb: ['GOAL! Wing-back {p} gets forward and scores!'],
     injuryNoSub: ['{p} is injured and {t} have nobody left to bring on — down to {n}.'],
   };
   const fill = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => (v[k] ?? ''));
@@ -354,18 +400,21 @@
     const car = S.career;
     // In a player career the club is run by the AI, which gives your player a little extra trust.
     const favor = car && car.mode === 'player' && car.clubId === clubId ? car.pid : null;
+    let style = 'balanced', roles = [];
     if (userSide && !favor) {
       formation = C().formation; ids = matchLineup().ids; mentality = C().mentality;
+      style = C().style || 'balanced'; roles = C().roles || [];
     } else {
+      style = clubStyle(club);
       if (!club.formation) club.formation = pickFormation(club);
       formation = club.formation; ids = bestXI(club.pids, formation, { bias: favor ? { [favor]: 3 } : null }); mentality = 'balanced';
     }
     const slots = FORMATIONS[formation];
     const xi = [];
-    ids.forEach((id, i) => { if (id) xi.push({ pid: id, slot: slots[i][0], si: i }); });
+    ids.forEach((id, i) => { if (id) xi.push({ pid: id, slot: slots[i][0], si: i, role: roleFor(S.players[id], slots[i][0], roles[i]) }); });
     const bench = club.pids.filter((id) => !ids.includes(id) && available(S.players[id]))
       .sort((a, b) => (S.players[b].ovr + (b === favor ? 20 : 0)) - (S.players[a].ovr + (a === favor ? 20 : 0))).slice(0, 9);
-    return { clubId, name: club.name, short: club.short, formation, mentality, xi, bench };
+    return { clubId, name: club.name, short: club.short, formation, mentality, style, xi, bench };
   }
 
   function sideStrength(side, home) {
@@ -378,11 +427,17 @@
     const mid = (L.MID.length ? avg(L.MID) : 40) + (L.MID.length - 4) * 1.5;
     const att = L.ATT.length ? avg(L.ATT) + (L.ATT.length - 2) * 1.5 : mid - 5;
     const m = MENTALITY[side.mentality] || MENTALITY.balanced;
+    const sty = STYLES[side.style] || STYLES.balanced;
     const ha = home ? 1.5 : 0;
+    // Roles shift the team's balance a little.
+    const rf = { att: 0, mid: 0, def: 0 };
+    for (const x of side.xi) { const fx = ROLE[x.role]?.fx || {}; rf.att += fx.att || 0; rf.mid += fx.mid || 0; rf.def += fx.def || 0; }
+    // Tiki-taka needs technicians: its control bonus scales with midfield quality.
+    const ctrl = (sty.ctrl || 0) * (side.style === 'tiki' ? clamp((mid - 66) / 14, 0.2, 1.2) : 1);
     return {
-      attack: 0.65 * att + 0.35 * mid + m.att - down * 4 + ha,
-      defense: 0.7 * def + 0.3 * mid + m.def - down * 3 + ha * 0.7,
-      control: mid - down * 4 + ha,
+      attack: 0.65 * att + 0.35 * mid + m.att + (sty.att || 0) + rf.att * 0.8 - down * 4 + ha,
+      defense: 0.7 * def + 0.3 * mid + m.def + (sty.def || 0) + rf.def * 0.8 - down * 3 + ha * 0.7,
+      control: mid + ctrl + rf.mid * 0.6 - down * 4 + ha,
       possBias: m.poss,
       gk, ovr: avg(all), att, mid, def,
     };
@@ -419,11 +474,17 @@
     const gkOf = (t) => sides[t].xi.find((x) => x.slot === 'GK')?.pid;
     const onLine = (t, line) => sides[t].xi.filter((x) => LINE[x.slot] === line).map((x) => x.pid);
     const anyOf = (t, line) => { const l = onLine(t, line); return l.length ? pick(l) : pick(sides[t].xi)?.pid; };
-    const pickW = (t, W, pow, excl) => {
+    const sty = [STYLES[H.style] || STYLES.balanced, STYLES[A.style] || STYLES.balanced];
+    const roleOf = (t, pid) => sides[t].xi.find((x) => x.pid === pid)?.role;
+    const pickW = (t, W, pow, excl, key) => {
       const c = sides[t].xi.filter((x) => x.pid !== excl);
-      const x = weighted(c, (x) => (W[x.slot] || 0.3) * Math.pow(Math.max(30, eff(S.players[x.pid], x.slot)) / 70, pow));
+      const wide = key === 'assist' && sty[t].wide;
+      const x = weighted(c, (x) => (W[x.slot] || 0.3) * Math.pow(Math.max(30, eff(S.players[x.pid], x.slot)) / 70, pow)
+        * (key ? (ROLE[x.role]?.fx[key] ?? 1) : 1) * (wide && ['LW', 'RW', 'LM', 'RM', 'LB', 'RB', 'LWB', 'RWB'].includes(x.slot) ? sty[t].wide : 1));
       return x ? x.pid : null;
     };
+    // Chance that an attack ends with a cross met by a header (wing play, long ball, crossers, target men).
+    const crossChance = (t) => clamp((sty[t].cross || 0) + sides[t].xi.reduce((a, x) => a + (ROLE[x.role]?.fx.cross || 0) * 0.08, 0) + 0.05, 0, 0.4);
 
     function goal(t, pid, apid, kind) {
       mark(kind === 'pen' ? 8 : 3);
@@ -432,8 +493,9 @@
       if (apid) pm[apid].a++;
       goals.push({ lbl, side: t, pid, apid: apid || null, pen: kind === 'pen' });
       const v = { p: nm(pid), a: nm(apid), t: sides[t].name, gk: nm(gkOf(1 - t)) };
-      let msg = kind === 'pen' ? T('penGoal', v) : kind === 'header' ? T('header', v) : T('goal', v);
-      if (apid && kind !== 'pen') msg += T('assist', v);
+      const rl = roleOf(t, pid);
+      let msg = kind === 'pen' ? T('penGoal', v) : kind === 'header' ? T('header', v) : kind === 'cross' ? `GOAL! ${v.a} whips in a cross and ${v.p} powers a header home!` : COMM['r_' + rl] && rand() < 0.7 ? T('r_' + rl, v) : T('goal', v);
+      if (apid && kind !== 'pen' && kind !== 'cross') msg += T('assist', v);
       say('goal', t, `${msg} ${H.short} ${score[0]}-${score[1]} ${A.short}`);
     }
     function corner(t) {
@@ -441,12 +503,12 @@
       mark(4);
       if (rand() < 0.25) say('info', t, T('corner', { t: sides[t].name, side: pick(['left', 'right']) }));
       const r = rand();
-      if (r < 0.045) {
-        const pid = pickW(t, HEAD_W, 3);
-        const apid = pickW(t, ASSIST_W, 2, pid);
+      if (r < 0.045 * (sty[t].cross ? 1.4 : 1)) {
+        const pid = pickW(t, HEAD_W, 3, null, 'head');
+        const apid = pickW(t, ASSIST_W, 2, pid, 'assist');
         if (pid) { st.shots[t]++; st.sot[t]++; goal(t, pid, apid, 'header'); }
       } else if (r < 0.15) {
-        const pid = pickW(t, HEAD_W, 3);
+        const pid = pickW(t, HEAD_W, 3, null, 'head');
         if (!pid) return;
         st.shots[t]++;
         if (rand() < 0.4) {
@@ -459,7 +521,7 @@
     }
     function penalty(t) {
       const o = 1 - t;
-      const fouled = pickW(t, SHOOT_W, 3);
+      const fouled = pickW(t, SHOOT_W, 3, null, 'shoot');
       const d = anyOf(o, 'DEF');
       say('chance', t, T('penAward', { t: sides[t].name, p: nm(fouled), d: nm(d) }));
       const taker = sides[t].xi.filter((x) => x.slot !== 'GK').sort((a, b) => effOf(b.pid) - effOf(a.pid))[0]?.pid;
@@ -472,21 +534,39 @@
     function attack(t) {
       const o = 1 - t;
       const diff = str[t].attack - str[o].defense;
-      if (rand() > clamp(0.56 + diff / 110, 0.36, 0.76)) {
+      if (rand() > clamp(0.56 + diff / 110 + (sty[t].shot || 0) + (sty[o].oppShot || 0), 0.3, 0.8)) {
         const r = rand();
         if (r < 0.14) {
           mark(7);
-          const p = pickW(t, SHOOT_W, 3); const d = anyOf(o, 'DEF');
+          const p = pickW(t, SHOOT_W, 3, null, 'shoot'); const d = anyOf(o, 'DEF');
           if (p && d) say('info', t, T('blocked', { p: nm(p), d: nm(d) }));
         } else if (r < 0.22) {
-          const p = pickW(t, ASSIST_W, 2); const a = pickW(t, ASSIST_W, 2, p);
+          const p = pickW(t, ASSIST_W, 2, null, 'assist'); const a = pickW(t, ASSIST_W, 2, p, 'assist');
           if (p) say('info', t, T('buildup', { p: nm(p), a: nm(a), t: sides[t].name }));
         }
         if (rand() < 0.12) corner(t);
         return;
       }
       if (rand() < 0.012) { penalty(t); return; }
-      const sh = pickW(t, SHOOT_W, 3);
+      // Cross into the box, met with a header.
+      if (rand() < crossChance(t)) {
+        const hd = pickW(t, HEAD_W, 3, null, 'head');
+        const cr = pickW(t, ASSIST_W, 2, hd, 'assist');
+        if (hd && cr) {
+          st.shots[t]++;
+          const he = effOf(hd) - 4;
+          if (rand() < clamp(0.36 + (he - 75) / 90, 0.2, 0.5)) {
+            st.sot[t]++;
+            if (rand() < clamp(0.3 + (he - str[o].gk) / 120, 0.12, 0.45)) { goal(t, hd, cr, 'cross'); return; }
+            const g = gkOf(o); if (g) pm[g].saves++;
+            mark(2);
+            say('chance', t, `${nm(cr)} whips in a cross, ${nm(hd)} heads it goalwards... saved by ${nm(g)}!`);
+          } else { mark(1); if (rand() < 0.6) say('chance', t, `${nm(cr)} crosses from the ${pick(['left', 'right'])}, but ${nm(hd)} heads over.`); }
+          if (rand() < 0.2) corner(t);
+          return;
+        }
+      }
+      const sh = pickW(t, SHOOT_W, 3, null, 'shoot');
       if (!sh) return;
       const se = effOf(sh);
       st.shots[t]++;
@@ -497,8 +577,8 @@
         return;
       }
       st.sot[t]++;
-      if (rand() < clamp(0.32 + (se - str[o].gk) / 120 + diff / 400, 0.14, 0.5)) {
-        goal(t, sh, rand() < 0.72 ? pickW(t, ASSIST_W, 3, sh) : null, 'open');
+      if (rand() < clamp(0.32 + (se - str[o].gk) / 120 + diff / 400 + (sty[t].goal || 0), 0.14, 0.52)) {
+        goal(t, sh, rand() < 0.72 ? pickW(t, ASSIST_W, 3, sh, 'assist') : null, 'open');
       } else {
         const g = gkOf(o); if (g) pm[g].saves++;
         mark(2);
@@ -527,7 +607,7 @@
     }
     function card(t) {
       const cands = sides[t].xi.filter((x) => x.slot !== 'GK');
-      const x = weighted(cands, (x) => ({ DEF: 3, MID: 2.5, ATT: 1.2 }[LINE[x.slot]] || 1));
+      const x = weighted(cands, (x) => ({ DEF: 3, MID: 2.5, ATT: 1.2 }[LINE[x.slot]] || 1) * (ROLE[x.role]?.fx.card || 1));
       if (!x) return;
       const r = pm[x.pid];
       mark(5);
@@ -590,6 +670,7 @@
       side.bench = side.bench.filter((id) => id !== inn);
       const off = out.pid;
       out.pid = inn;
+      out.role = roleFor(S.players[inn], out.slot, out.role);
       addPM(inn, t, out.slot, m);
       say('sub', t, `🔁 ${side.name}: ${nm(inn)} comes on for ${nm(off)}.`, { pid: inn, off });
       recalc();
@@ -604,9 +685,9 @@
       pH = clamp(pH, 0.22, 0.78);
       const t = rand() < pH ? 0 : 1;
       st.poss[t]++;
-      if (rand() < 0.3) { attacked = true; attack(t); }
+      if (rand() < 0.3 * (sty[t].rate || 1) * (sty[1 - t].oppRate || 1)) { attacked = true; attack(t); }
       const shotEv = [1, 2, 3, 6, 8, 9].includes(tickEv);
-      if (rand() < 0.034) card(rand() < 0.5 ? 0 : 1);
+      for (const side of [0, 1]) if (rand() < 0.017 * (sty[side].cards || 1)) card(side);
       if (rand() < 0.0024) injury(rand() < 0.5 ? 0 : 1);
       if (tl) tl.push([t, shotEv ? 3 : attacked ? 2 : rand() < 0.3 ? 0 : rand() < 0.65 ? 1 : 2, tickEv, lbl]);
       ticks++;
@@ -1034,7 +1115,8 @@
     let pid = null;
     if (opts.mode === 'player') {
       const p = addPlayer(S, { name: manager || 'You', pos: opts.pos || 'ST', ovr: 64, age: 17, clubId });
-      p.pot = randInt(86, 92); p.me = 1; p.wage = niceWage(wageFor(p));
+      p.pot = randInt(86, 92); p.me = 1; p.wage = niceWage(wageFor(p)); p.contract = 2027;
+      p.role = ROLE[opts.role]?.group === roleGroup(p.pos) ? opts.role : defaultRole(p.pos);
       pid = p.id;
       invalidate();
     }
@@ -1402,6 +1484,17 @@
       for (const id of mv.down) S.clubs[id].leagueId = mv.lower;
     }
     c.leagueId = S.clubs[c.clubId].leagueId;
+    // Expiring contracts: AI clubs renew or release; your players leave unless you renewed them.
+    for (const p of Object.values(S.players)) {
+      if (p.clubId === 'FA' || p.contract > c.season) continue;
+      if (p.id === c.pid) { p.contract = c.season + 2; p.wage = Math.max(p.wage, wageFor(p)); news(`Your contract has been extended to ${contractLabel(p)} on ${money(p.wage)} a week.`, 'info'); continue; }
+      if (p.clubId === c.clubId && !isPlayerMode()) {
+        if (S.clubs[c.clubId].pids.length > MIN_SQUAD) { movePlayer(p, 'FA'); news(`👋 ${p.name}'s contract expired and he has left on a free transfer.`, 'bad'); continue; }
+        p.contract = c.season + 1; news(`${p.name}'s contract was extended by a year because the squad was too small.`, 'info'); continue;
+      }
+      if (p.age >= 33 && rand() < 0.5) movePlayer(p, 'FA');
+      else { p.contract = c.season + randInt(1, 3); p.wage = wageFor(p); }
+    }
     const retired = [];
     for (const p of Object.values(S.players)) {
       if (p.clubId === 'FA') continue;
@@ -1419,7 +1512,7 @@
       p.age++;
       p.ovr0 = p.ovr; p.xp = (p.xp || 0) * 0.5;
       p.form = 0; p.inj = 0; p.sus = 0; p.st = newStats(); p.cg = {};
-      p.wage = wageFor(p);
+      if (p.clubId !== c.clubId && p.id !== c.pid) p.wage = wageFor(p); // your players keep the wage they signed for
       if (p.age >= 35 && p.id !== c.pid && rand() < 0.25 + (p.age - 35) * 0.2) retired.push(p);
     }
     for (const p of retired) {
@@ -1550,6 +1643,61 @@
     if (amount >= val * 0.85) { t.counter = val; return { status: 'counter', msg: `${clubName(p.clubId)} reject the offer but would accept ${money(val)}.` }; }
     return { status: 'rejected', msg: `${clubName(p.clubId)} reject the offer: it is well below their valuation. (${3 - t.bids} bid${3 - t.bids === 1 ? '' : 's'} left this window)` };
   }
+  /* --- Contracts & wage negotiation --- */
+  const contractLabel = (p) => (p.contract ? `Jun ${p.contract + 1}` : '—');
+  const expiring = (p) => p.contract <= C().season;
+  // What a player asks for: signings depend on how keen he is, renewals on his importance and form.
+  function wageAsk(p, ctx) {
+    let base = Math.max(p.wage || 0, wageFor(p));
+    if (ctx === 'sign') base *= interest(p, C().clubId).wm || 1.1;
+    else {
+      const r = squadRank(p);
+      base *= r < 3 ? 1.25 : r < 11 ? 1.12 : 1;
+      if (p.form > 0.8) base *= 1.05;
+      if (p.age >= 31) base *= 0.95;
+    }
+    return niceWage(base);
+  }
+  // Young players prefer shorter deals (to earn more later); older players want security.
+  const yearsFactor = (p, years) => 1 + (p.age <= 23 ? 0.03 : p.age >= 30 ? -0.04 : 0) * (years - 3);
+  function wageTalk(p, t, offer, years, ctx) {
+    const w = t.w || (t.w = { bids: 0, blocked: false, counter: 0 });
+    if (w.blocked) return { status: 'ended', msg: `${p.name} is not willing to talk any more.` };
+    const demand = niceWage(wageAsk(p, ctx) * yearsFactor(p, years));
+    const floor = demand * (0.9 + hash01(p.id + 'w') * 0.07); // how far his agent will quietly come down
+    w.bids++;
+    if (offer >= floor) { w.agreed = { wage: offer, years }; w.counter = 0; return { status: 'accepted', msg: `Agreed! ${p.name} accepts ${money(offer)} a week for ${years} year${years > 1 ? 's' : ''}.` }; }
+    if (w.bids >= 3) { w.blocked = true; return { status: 'ended', msg: `${p.name}'s agent walks away after three offers that were too low.` }; }
+    if (offer >= demand * 0.78) { w.counter = demand; w.counterYears = years; return { status: 'counter', msg: `${p.name}'s agent wants ${money(demand)} a week on a ${years}-year deal. (${3 - w.bids} offer${3 - w.bids === 1 ? '' : 's'} left)` }; }
+    return { status: 'rejected', msg: `${p.name}'s agent rejects that straight away. He is looking for around ${money(demand)} a week. (${3 - w.bids} offer${3 - w.bids === 1 ? '' : 's'} left)` };
+  }
+  function renewTalk(pid) {
+    const c = C();
+    c.renew = c.renew || {};
+    let t = c.renew[pid];
+    if (!t || t.season !== c.season) t = c.renew[pid] = { season: c.season };
+    return t;
+  }
+  function completeRenewal(pid) {
+    const c = C(), p = S.players[pid], a = renewTalk(pid).w?.agreed;
+    if (!a) return toast('Agree terms first.', 'bad');
+    if (wageBill() - (p.wage || 0) + a.wage > c.wageBudget) return toast('That wage does not fit your wage budget.', 'bad');
+    p.wage = a.wage; p.contract = c.season + a.years;
+    delete c.renew[pid];
+    news(`✍️ ${p.name} signs a new contract until ${contractLabel(p)} on ${money(p.wage)} a week.`, 'good');
+    save();
+    toast(`${p.name} has renewed his contract.`, 'good');
+    return true;
+  }
+  // Player career: the club has a hidden maximum it will pay you.
+  function clubWageTalk(o, ask) {
+    o.max = o.max || niceWage(o.wage * (1.12 + hash01(o.id) * 0.25));
+    o.bids = (o.bids || 0) + 1;
+    if (ask <= o.max) { o.wage = Math.max(o.wage, ask); o.agreed = true; return { status: 'accepted', msg: `${clubName(o.clubId)} agree to ${money(o.wage)} a week.` }; }
+    if (o.bids >= 3) { o.withdrawn = true; return { status: 'ended', msg: `${clubName(o.clubId)} lose patience and withdraw the offer.` }; }
+    if (ask <= o.max * 1.2) { o.wage = o.max; return { status: 'counter', msg: `${clubName(o.clubId)} come back with their final offer: ${money(o.max)} a week.` }; }
+    return { status: 'rejected', msg: `${clubName(o.clubId)} say that is far too much. The offer stays at ${money(o.wage)} a week.` };
+  }
   function signingBlocker(p) {
     const c = C(), me = S.clubs[c.clubId];
     if (p.clubId !== 'FA' && !windowInfo().open) return `The transfer window is closed (${windowInfo().label.split('· ')[1] || ''}). Free agents can still be signed.`;
@@ -1566,18 +1714,19 @@
     if (err) return toast(err, 'bad');
     if (!fee && p.clubId !== 'FA') return toast('Agree a fee first.', 'bad');
     if (me.budget < fee) return toast('Not enough transfer budget.', 'bad');
-    const it = interest(p, c.clubId);
-    const wage = wageDemand(p, it);
-    if (wageBill() + wage > c.wageBudget) return toast(`His wage demand (${money(wage)}/wk) doesn't fit your wage budget. Sell players to free up wages.`, 'bad');
+    const terms = t.w?.agreed;
+    if (!terms) return toast('Agree personal terms (wage and contract length) first.', 'bad');
+    const wage = terms.wage;
+    if (wageBill() + wage > c.wageBudget) return toast(`${money(wage)}/wk doesn't fit your wage budget. Sell players to free up wages.`, 'bad');
     const from = S.clubs[p.clubId];
     const fromName = from ? from.name : 'Free agency';
     me.budget -= fee;
     if (from && from.id !== 'FA') from.budget += fee;
     movePlayer(p, c.clubId);
-    p.wage = wage; p.inj = 0; p.sus = 0;
+    p.wage = wage; p.contract = c.season + terms.years; p.inj = 0; p.sus = 0;
     delete c.talks[pid];
     c.transfers.unshift({ season: c.season, date: curDate(), pid, name: p.name, dir: 'in', club: fromName, fee });
-    news(`✍️ Signed ${p.name} (${p.pos}, ${p.ovr}) from ${fromName} for ${money(fee)} on ${money(wage)} a week.`, 'good');
+    news(`✍️ Signed ${p.name} (${p.pos}, ${p.ovr}) from ${fromName} for ${money(fee)} on ${money(wage)} a week until ${contractLabel(p)}.`, 'good');
     save();
     toast(`${p.name} has joined ${me.name}!`, 'good');
     return true;
@@ -1612,7 +1761,7 @@
     me.budget += amount;
     if (buyer.id !== 'FA') buyer.budget -= amount;
     movePlayer(p, clubId);
-    if (clubId !== 'FA') p.wage = wageFor(p);
+    if (clubId !== 'FA') { p.wage = wageFor(p); p.contract = c.season + randInt(2, 5); }
     c.offers = c.offers.filter((o) => o.pid !== pid);
     cleanLineup();
     c.transfers.unshift({ season: c.season, date: curDate(), pid, name: p.name, dir: 'out', club: buyer.name, fee: amount });
@@ -1658,7 +1807,7 @@
     fits.sort((a, b) => prestige(b.id) - prestige(a.id));
     return shuffle(fits.slice(0, 8)).slice(0, n).map((cl) => ({
       id: 'o' + c.dayIdx + '-' + randInt(0, 99999), clubId: cl.id, amount: niceRound(fee * (0.95 + rand() * 0.2)),
-      wage: niceWage(wageFor(p) * (1.1 + rand() * 0.4)), until: c.dayIdx + 4, role: roleAt(cl.id, p),
+      wage: niceWage(wageFor(p) * (1.1 + rand() * 0.4)), years: randInt(3, 5), until: c.dayIdx + 4, role: roleAt(cl.id, p),
     }));
   }
   function joinClub(o) {
@@ -1667,6 +1816,7 @@
     from.budget += o.amount; to.budget -= o.amount;
     movePlayer(p, to.id);
     p.wage = o.wage;
+    p.contract = c.season + (o.years || 4);
     c.clubId = to.id; c.leagueId = to.leagueId; c.offers = [];
     if (from.pids.length < 18) fillSquad(S, from, 18);
     c.transfers.unshift({ season: c.season, date: curDate(), pid: p.id, name: p.name, dir: 'in', club: from.name, to: to.name, fee: o.amount });
@@ -1708,6 +1858,7 @@
       if (from.id !== 'FA') from.budget += fee;
       movePlayer(best, buyer.id);
       best.wage = wageFor(best);
+      best.contract = c.season + randInt(2, 5);
       // Keep squads a sensible size: the weakest surplus player is released.
       if (buyer.pids.length > 28) {
         const cut = buyer.pids.map((id) => S.players[id]).sort((a, b) => a.ovr - b.ovr)[0];
@@ -2115,7 +2266,9 @@
           <h2 class="step"><span>2</span> ${pm ? 'Your player' : 'Manager name'}</h2>
           <div class="row gap wrap">
             <input class="input" id="mgr-name" maxlength="30" placeholder="${pm ? 'Player name' : 'Your name'}" value="${esc(ui.managerName)}">
-            ${pm ? `<label class="inline">Position <select class="input" id="start-pos">${POSITIONS.map((x) => `<option ${x === (ui.startPos || 'ST') ? 'selected' : ''}>${x}</option>`).join('')}</select></label><span class="muted small">Starts at 64 OVR, age 17, with high potential.</span>` : ''}
+            ${pm ? `<label class="inline">Position <select class="input" id="start-pos" data-change="start-pos">${POSITIONS.map((x) => `<option ${x === (ui.startPos || 'ST') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+              <label class="inline">Player type <select class="input" id="start-role" data-change="start-role">${ROLE_GROUPS[roleGroup(ui.startPos || 'ST')].map(([id, label]) => `<option value="${id}" ${ui.startRole === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+              <span class="muted small">Starts at 64 OVR, age 17, with high potential.</span>` : ''}
           </div>
           <h2 class="step"><span>3</span> Choose a league</h2>
           <h4>Top divisions</h4><div class="league-grid">${leagueCards(1)}</div>
@@ -2249,6 +2402,7 @@
           return `<div class="offer"><div>${crest(S.clubs[o.clubId])} <strong>${esc(clubName(o.clubId))}</strong> bid <strong class="money">${money(o.amount)}</strong> for ${playerLink(p)} ${posBadge(p.pos)} ${ovrBadge(p.ovr)} <span class="muted small">(value ${money(playerValue(p))})</span></div>
           <div class="row gap"><button class="btn primary sm" data-act="accept-offer" data-id="${o.id}">Accept</button><button class="btn ghost sm" data-act="reject-offer" data-id="${o.id}">Reject</button></div></div>`;
         }).join('')}</section>` : ''}
+        ${(() => { const ex = squad.filter((p) => expiring(p)).sort((a, b) => b.ovr - a.ovr); return ex.length ? `<section class="card span2 offers"><h3>Contracts expiring this season</h3><p class="muted small">These players leave on a free transfer at the end of the season unless you agree new deals.</p><ul class="plist">${ex.map((p) => `<li>${posBadge(p.pos)} ${playerLink(p)} ${ovrBadge(p.ovr)} <span class="muted small">age ${p.age} · ${money(p.wage)}/wk</span><button class="btn xs primary ml-auto" data-act="renew" data-id="${p.id}">Negotiate</button></li>`).join('')}</ul></section>` : ''; })()}
         <section class="card">
           <h3>Your competitions <button class="link small" data-act="tab" data-id="comps">All competitions →</button></h3>
           <ul class="plist">${userCompIds().map((id) => { const comp = c.comps[id]; return `<li><button class="link" data-act="comp-go" data-id="${id}">${compTag(comp)} ${esc(comp.name)}</button><span class="ml-auto small">${esc(compStatus(comp, uid))}</span></li>`; }).join('')}</ul>
@@ -2354,9 +2508,9 @@
       <section class="card match-pre">
         <div class="mp-head"><span>${compTag(nm.comp)} ${esc(nm.comp.name)} · ${esc(nm.rd.name)}${opts.neutral ? ' · Neutral venue' : ''}</span><span>${fmtDate(nm.date, true)}</span></div>
         <div class="nm">
-          <div class="nm-team">${crest(S.clubs[H.clubId], 'lg')}<strong>${esc(H.name)}</strong><span class="muted small">${H.formation} · ${MENTALITY[H.mentality].label}</span></div>
+          <div class="nm-team">${crest(S.clubs[H.clubId], 'lg')}<strong>${esc(H.name)}</strong><span class="muted small">${H.formation} · ${STYLES[H.style]?.label || ''} · ${MENTALITY[H.mentality].label}</span></div>
           <div class="nm-vs"><span class="vs">VS</span></div>
-          <div class="nm-team">${crest(S.clubs[A.clubId], 'lg')}<strong>${esc(A.name)}</strong><span class="muted small">${A.formation} · ${MENTALITY[A.mentality].label}</span></div>
+          <div class="nm-team">${crest(S.clubs[A.clubId], 'lg')}<strong>${esc(A.name)}</strong><span class="muted small">${A.formation} · ${STYLES[A.style]?.label || ''} · ${MENTALITY[A.mentality].label}</span></div>
         </div>
         ${legInfo}
         ${strengthBars(sH, sA)}
@@ -2366,6 +2520,9 @@
         ${covers.length ? `<div class="notice">${covers.map((cv) => `${esc(S.players[cv.out]?.name || '?')} is ${S.players[cv.out]?.inj > 0 ? 'injured' : 'suspended'}${cv.in ? `, so ${esc(S.players[cv.in].name)} covers at ${cv.pos}` : ''}`).join('. ')}. Your chosen XI comes back automatically when players are available.</div>` : ''}
         ${pm ? (() => { const mySide = nm.m.h === uid ? H : A; const inXi = mySide.xi.find((x) => x.pid === c.pid); const p = me(); return `<div class="notice ${inXi ? 'good' : 'info'}">${!available(p) ? `You are ${p.inj > 0 ? `injured (${p.inj} match${p.inj > 1 ? 'es' : ''})` : 'suspended'} and will miss this match.` : inXi ? `You are in the starting XI at <strong>${inXi.slot}</strong>.` : 'You start on the bench. Impress in training and you may come on in the second half.'}</div>`; })() : ''}
         <div class="row gap wrap center">
+          ${pm ? '' : `<label class="inline">Play style
+            <select class="input sm" id="sel-style2" data-change="style">${Object.entries(STYLES).map(([k, st]) => `<option value="${k}" ${(c.style || 'balanced') === k ? 'selected' : ''}>${st.label}</option>`).join('')}</select>
+          </label>`}
           ${pm ? '' : `<label class="inline">Mentality
             <select class="input sm" id="sel-mentality" data-change="mentality">${Object.entries(MENTALITY).map(([k, m]) => `<option value="${k}" ${c.mentality === k ? 'selected' : ''}>${m.label}</option>`).join('')}</select>
           </label>`}
@@ -2650,6 +2807,8 @@
           <div class="muted">${esc(club.name)} · ${esc(S.leagues[club.leagueId].name)} · Age ${p.age}</div>
           <div class="stats-row">
             <div class="big-stat"><span>Role</span><strong>${esc(playerRole())}</strong></div>
+            <div class="big-stat"><span>Player type</span><strong>${esc(ROLE[p.role]?.label || '—')}</strong></div>
+            <div class="big-stat"><span>Contract</span><strong>${contractLabel(p)}</strong></div>
             <div class="big-stat"><span>Potential</span><strong>${potRange(p)}</strong></div>
             <div class="big-stat"><span>Value</span><strong class="money">${money(playerValue(p))}</strong></div>
             <div class="big-stat"><span>Wage</span><strong class="money">${money(p.wage)}/wk</strong></div>
@@ -2671,10 +2830,13 @@
   function offersHtml() {
     const c = C();
     if (!c.offers.length) return '';
-    return `<section class="card span2 offers"><h3>Clubs want to sign you</h3>${c.offers.map((o) => `
-      <div class="offer"><div>${crest(S.clubs[o.clubId])} <strong>${esc(clubName(o.clubId))}</strong> <span class="muted small">${esc(S.leagues[S.clubs[o.clubId].leagueId]?.name || '')} · rated ${clubRating(o.clubId)}</span><br>
-        <span class="small">Fee <span class="money">${money(o.amount)}</span> · wage <span class="money">${money(o.wage)}/wk</span> · expected role: <strong>${esc(o.role)}</strong></span></div>
-        <div class="row gap"><button class="btn primary sm" data-act="join-offer" data-id="${o.id}">Join</button><button class="btn ghost sm" data-act="reject-offer" data-id="${o.id}">Decline</button></div></div>`).join('')}</section>`;
+    return `<section class="card span2 offers"><h3>Clubs want to sign you</h3>${c.offers.map((o) => playerOfferHtml(o)).join('')}</section>`;
+  }
+  function playerOfferHtml(o) {
+    return `<div class="offer p-offer"><div>${crest(S.clubs[o.clubId])} <strong>${esc(clubName(o.clubId))}</strong> <span class="muted small">${esc(S.leagues[S.clubs[o.clubId].leagueId]?.name || '')} · rated ${clubRating(o.clubId)}</span><br>
+        <span class="small">Fee <span class="money">${money(o.amount)}</span> · wage <span class="money">${money(o.wage)}/wk</span> · ${o.years || 4}-year deal · expected role: <strong>${esc(o.role)}</strong></span>
+        ${o.msg ? `<div class="notice ${o.status === 'accepted' ? 'good' : 'info'} small">${esc(o.msg)}</div>` : ''}</div>
+        <div class="row gap wrap">${o.agreed ? '' : `<input class="input xs" id="ask-${o.id}" type="number" min="1" title="Wage to ask for (€K per week)" value="${Math.round(o.wage * 1.25 / 1000)}"><button class="btn sm" data-act="p-offer-ask" data-id="${o.id}">Ask €K/wk</button>`}<button class="btn primary sm" data-act="join-offer" data-id="${o.id}">Join</button><button class="btn ghost sm" data-act="reject-offer" data-id="${o.id}">Decline</button></div></div>`;
   }
   function viewHomePlayer() {
     const c = C(), uid = c.clubId, club = S.clubs[uid], p = me();
@@ -2726,11 +2888,23 @@
           ${c.history.length ? `<h4>Seasons</h4><ul class="plist">${c.history.map((h) => `<li>${seasonLabel(h.season)} · ${esc(h.club)} <span class="muted small">${esc(h.league || '')}, ${ordinal(h.pos)}</span><span class="ml-auto small">${h.me ? `${h.me.apps} apps, ${h.me.g} goals, OVR ${h.me.ovr0}→${h.me.ovr}` : ''}</span></li>`).join('')}</ul>` : ''}
         </section>
         <section class="card">
+          <h3>Playing style</h3>
+          <p class="muted small">How you play when you are on the pitch. It changes how often you shoot, create or head crosses, and the commentary.</p>
+          <label class="inline">Player type <select class="input sm" id="my-role" data-change="my-role">${ROLE_GROUPS[roleGroup(p.pos)].map(([id, label]) => `<option value="${id}" ${p.role === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+          <h3 class="mt">Contract</h3>
+          <p class="small">You earn <strong class="money">${money(p.wage)}</strong> a week until <strong>${contractLabel(p)}</strong>.</p>
+          ${(() => { const r = c.pRenew && c.pRenew.season === c.season ? c.pRenew : null; if (!r) return '<button class="btn" data-act="p-renew-ask">Ask the club for a new contract</button>';
+            if (r.withdrawn) return '<p class="muted small">The club has ended contract talks for this season.</p>';
+            if (r.done) return '<p class="muted small">You signed a new contract this season.</p>';
+            return `<div class="offer"><div><strong>${esc(clubName(c.clubId))}</strong> offer <span class="money">${money(r.wage)}/wk</span> for ${r.years} years</div><div class="row gap"><button class="btn primary sm" data-act="p-renew-sign">Sign</button></div></div>
+              <div class="row gap wrap"><label class="inline">Ask for (€K/week) <input class="input sm" id="p-ask-renew" type="number" min="1" value="${Math.round(r.wage * 1.2 / 1000)}"></label><button class="btn sm" data-act="p-renew-counter">Negotiate</button></div>${r.msg ? `<div class="notice info">${esc(r.msg)}</div>` : ''}`; })()}
+        </section>
+        <section class="card">
           <h3>Transfers</h3>
           <div class="notice ${win.open ? 'good' : ''}"><strong>${esc(win.label)}.</strong> ${win.open ? 'You can ask your agent to find you a new club.' : 'Clubs can only sign you during a transfer window.'}</div>
           <p class="muted small">Clubs look for players who would fit their level. Keep your OVR rising and bigger clubs will come for you.</p>
           <button class="btn primary" data-act="request-transfer" ${win.open ? '' : 'disabled'}>Ask agent to find a new club</button>
-          ${c.offers.length ? `<div class="mt">${c.offers.map((o) => `<div class="offer"><div><strong>${esc(clubName(o.clubId))}</strong> <span class="muted small">${esc(o.role)}</span><br><span class="small">${money(o.amount)} fee · ${money(o.wage)}/wk</span></div><div class="row gap"><button class="btn primary sm" data-act="join-offer" data-id="${o.id}">Join</button><button class="btn ghost sm" data-act="reject-offer" data-id="${o.id}">Decline</button></div></div>`).join('')}</div>` : ''}
+          ${c.offers.length ? `<div class="mt">${c.offers.map((o) => playerOfferHtml(o)).join('')}</div>` : ''}
           ${moves.length ? `<h4>Your moves</h4><ul class="plist">${moves.map((t) => `<li>${seasonLabel(t.season)} · ${esc(t.club)} → <strong>${esc(t.to || '')}</strong><span class="ml-auto money">${money(t.fee)}</span></li>`).join('')}</ul>` : ''}
         </section>
       </div>`;
@@ -2762,7 +2936,8 @@
     const coverBy = Object.fromEntries(covers.map((cv) => [cv.i, cv]));
     const slots = FORMATIONS[c.formation];
     const lineupSet = new Set(c.lineup);
-    const side = { xi: slots.map((s, i) => ({ pid: matchLineup().ids[i], slot: s[0] })).filter((x) => x.pid), mentality: c.mentality };
+    c.roles = slots.map(([pos], i) => (ROLE[c.roles?.[i]]?.group === roleGroup(pos) ? c.roles[i] : defaultRole(pos)));
+    const side = { xi: slots.map((s, i) => ({ pid: matchLineup().ids[i], slot: s[0], role: c.roles[i] })).filter((x) => x.pid), mentality: c.mentality, style: c.style };
     const st = sideStrength(side, false);
     const chips = slots.map(([pos, x, y], i) => {
       const p = S.players[c.lineup[i]];
@@ -2770,7 +2945,7 @@
       const e = eff(p, pos);
       const cv = coverBy[i];
       return `<button class="chip ${ui.squadSel === i ? 'sel' : ''} ${fit(p.pos, pos) < 0 ? 'oop' : ''} ${cv ? 'out' : ''}" style="left:${x}%;top:${y}%" data-act="slot" data-id="${i}" title="${esc(p.name)} (${p.pos}) playing ${pos}">
-        <span class="chip-r ${ovrClass(e)}">${e}</span><span class="chip-n">${esc(p.name.split(' ').slice(-1)[0])}</span><span class="chip-p">${cv ? (p.inj > 0 ? 'INJURED' : 'SUSPENDED') : pos}</span>
+        <span class="chip-r ${ovrClass(e)}">${e}</span><span class="chip-n">${esc(p.name.split(' ').slice(-1)[0])}</span><span class="chip-p">${cv ? (p.inj > 0 ? 'INJURED' : 'SUSPENDED') : `${pos} · ${c.roles[i].toUpperCase()}`}</span>
         ${cv && cv.in ? `<span class="chip-cover">↳ ${esc(S.players[cv.in].name.split(' ').slice(-1)[0])}</span>` : ''}</button>`;
     }).join('');
     const sorters = {
@@ -2788,11 +2963,16 @@
           <div class="row gap wrap">
             <label class="inline">Formation <select class="input sm" id="sel-formation" data-change="formation">${FORMATION_NAMES.map((f) => `<option ${f === c.formation ? 'selected' : ''}>${f}</option>`).join('')}</select></label>
             <label class="inline">Mentality <select class="input sm" id="sel-mentality2" data-change="mentality">${Object.entries(MENTALITY).map(([k, m]) => `<option value="${k}" ${c.mentality === k ? 'selected' : ''}>${m.label}</option>`).join('')}</select></label>
+            <label class="inline">Play style <select class="input sm" id="sel-style" data-change="style">${Object.entries(STYLES).map(([k, st]) => `<option value="${k}" ${(c.style || 'balanced') === k ? 'selected' : ''}>${st.label}</option>`).join('')}</select></label>
             <button class="btn sm" data-act="auto-pick">Auto-pick best XI</button>
           </div>
+          <p class="muted small style-desc">${esc(STYLES[c.style || 'balanced'].desc)}</p>
           <div class="pitch">${chips}<div class="pitch-lines"><i class="box top"></i><i class="box bottom"></i><i class="half"></i><i class="circle"></i></div></div>
           <p class="muted small">${ui.squadSel !== null ? `Selected <strong>${selPos}</strong>. Click a player in the list, or another shirt on the pitch to swap. <button class="link" data-act="slot-cancel">Cancel</button>` : 'Your XI is locked in: it only changes when you change it. Injured or suspended players get a stand-in (↳) for the next match and come back automatically when fit. Orange shirts are out of position.'}</p>
           ${changes.length ? `<div class="notice">Updated because players left: ${esc(changes.join('; '))}.</div>` : ''}
+          <h4>Player roles</h4>
+          <div class="roles">${slots.map(([pos], i) => { const p = S.players[c.lineup[i]]; const own = p && p.role && ROLE[p.role]?.group === roleGroup(pos); return `<div class="role-row"><span class="slot">${pos}</span><span class="role-name">${p ? esc(p.name.split(' ').slice(-1)[0]) : '—'}</span>${own ? `<span class="small muted">${esc(ROLE[p.role].label)} (his own style)</span>` : `<select class="input sm" id="role-${i}" data-slot="${i}" data-change="role">${ROLE_GROUPS[roleGroup(pos)].map(([id, label]) => `<option value="${id}" ${c.roles[i] === id ? 'selected' : ''}>${label}</option>`).join('')}</select>`}</div>`; }).join('')}</div>
+          <p class="muted small">Roles change who shoots, who creates, who heads crosses in, and how much each player adds to attack, midfield or defence.</p>
           <div class="team-ratings">
             <div><span>Attack</span><strong>${st.attack.toFixed(0)}</strong></div>
             <div><span>Midfield</span><strong>${st.control.toFixed(0)}</strong></div>
@@ -2803,7 +2983,7 @@
         <section class="card">
           <h3>Squad <span class="muted small">${club.pids.length}/${MAX_SQUAD} players · wages ${money(bill)}/wk of ${money(c.wageBudget)}</span></h3>
           <div class="tbl-wrap"><table class="tbl squad-tbl"><thead><tr>
-            ${th('pos', 'Pos')}<th class="left">Name</th>${th('age', 'Age')}${th('ovr', 'OVR')}${selPos ? `<th title="Rating in ${selPos}">@${selPos}</th>` : ''}<th>Form</th><th>Apps</th>${th('goals', 'G')}<th>A</th>${th('rating', 'Avg')}${th('value', 'Value')}${th('wage', 'Wage')}<th></th>
+            ${th('pos', 'Pos')}<th class="left">Name</th>${th('age', 'Age')}${th('ovr', 'OVR')}${selPos ? `<th title="Rating in ${selPos}">@${selPos}</th>` : ''}<th>Form</th><th>Apps</th>${th('goals', 'G')}<th>A</th>${th('rating', 'Avg')}${th('value', 'Value')}${th('wage', 'Wage')}<th>Contract</th><th></th>
           </tr></thead><tbody>
           ${players.map((p) => `<tr class="${lineupSet.has(p.id) ? 'starter' : ''} ${selPos ? 'pickable' : ''} ${!available(p) ? 'unavail' : ''}" ${selPos ? `data-act="assign" data-id="${p.id}"` : ''}>
             <td>${posBadge(p.pos)}</td>
@@ -2812,7 +2992,8 @@
             ${selPos ? `<td><strong class="${fit(p.pos, selPos) < 0 ? 'warn-t' : ''}">${eff(p, selPos)}</strong></td>` : ''}
             <td>${formArrow(p.form)}</td><td>${p.st.apps}</td><td>${p.st.goals}</td><td>${p.st.assists}</td><td>${p.st.apps ? avgRating(p).toFixed(2) : '-'}</td>
             <td class="money">${money(playerValue(p))}</td><td class="money muted">${money(p.wage)}</td>
-            <td><button class="btn xs ghost" data-act="sell" data-id="${p.id}">Sell</button></td>
+            <td class="${expiring(p) ? 'warn-t' : 'muted'} small">${contractLabel(p)}</td>
+            <td class="nowrap"><button class="btn xs ghost" data-act="renew" data-id="${p.id}">Contract</button> <button class="btn xs ghost" data-act="sell" data-id="${p.id}">Sell</button></td>
           </tr>`).join('')}
           </tbody></table></div>
         </section>
@@ -2887,6 +3068,49 @@
       </div>`;
   }
 
+  // Personal terms: wage and contract length, shared by signings and renewals.
+  function termsHtml(p, t, ctx, intro, prefix) {
+    const w = t.w || {};
+    const ask = wageAsk(p, ctx);
+    const def = ((w.lastOffer || ask * 0.9) / 1000).toFixed(0);
+    const years = w.lastYears || 3;
+    const room = C().wageBudget - wageBill() + (ctx === 'renew' ? (p.wage || 0) : 0);
+    return `<div class="terms">
+      <h4>Personal terms</h4>
+      <p class="small">${esc(intro)}</p>
+      <table class="tbl kv"><tbody>
+        <tr><td>${ctx === 'renew' ? 'Current wage' : 'Wage now'}</td><td class="money">${money(p.wage || 0)} / week</td></tr>
+        <tr><td>His agent's opening demand</td><td class="money">~${money(ask)} / week (3 years)</td></tr>
+        <tr><td>Wage room</td><td class="money ${room < ask ? 'warn-t' : ''}">${money(room)} / week</td></tr>
+      </tbody></table>
+      ${w.msg ? `<div class="notice ${w.status === 'accepted' ? 'good' : w.status === 'counter' ? 'info' : ''}">${esc(w.msg)}</div>` : ''}
+      ${w.agreed ? `<div class="row gap wrap mt"><button class="btn primary big" data-act="${prefix}-complete" data-id="${p.id}">${ctx === 'renew' ? 'Sign new contract' : 'Complete signing'}: ${money(w.agreed.wage)}/wk for ${w.agreed.years} yr${w.agreed.years > 1 ? 's' : ''}</button></div>`
+        : w.blocked ? '' : `<div class="row gap wrap mt">
+          <label class="inline">Wage (€K per week) <input class="input sm" id="wage-offer" type="number" min="1" step="1" value="${def}"></label>
+          <label class="inline">Years <select class="input sm" id="wage-years">${[1, 2, 3, 4, 5].map((y) => `<option ${y === years ? 'selected' : ''}>${y}</option>`).join('')}</select></label>
+          <button class="btn primary" data-act="${prefix}-wage" data-id="${p.id}">Offer contract</button>
+          ${w.counter ? `<button class="btn" data-act="${prefix}-wage-accept" data-id="${p.id}">Accept ${money(w.counter)}/wk</button>` : ''}
+        </div>
+        <p class="muted small">Agents quietly accept a bit less than they ask for. Younger players want more for longer deals, and older players take less for security. After 3 failed offers the talks end.</p>`}
+    </div>`;
+  }
+  function renewModal(pid) {
+    const c = C(), p = S.players[pid];
+    const t = renewTalk(pid);
+    const r = squadRank(p);
+    openModal(`
+      <div class="neg">
+        <div class="pm-head"><div class="pm-ovr ${ovrClass(p.ovr)}">${p.ovr}<small>${p.pos}</small></div>
+          <div><h2>${esc(p.name)}</h2><div class="muted">Age ${p.age} · contract until <strong class="${expiring(p) ? 'warn-t' : ''}">${contractLabel(p)}</strong> · ${r < 3 ? 'Key player' : r < 11 ? 'First-team player' : 'Squad player'}</div></div></div>
+        ${termsHtml(p, t, 'renew', expiring(p) ? 'His contract ends this season. If you do not agree a new one, he leaves for free in the summer.' : 'You can extend his contract now to secure his future.', 'ren')}
+      </div>`);
+  }
+  function wageOfferFromForm() {
+    const wage = Math.round((parseFloat($('#wage-offer').value) || 0) * 1000);
+    const years = parseInt($('#wage-years').value, 10) || 3;
+    return { wage, years };
+  }
+
   // Negotiation modal
   function negModal(pid) {
     const c = C(), p = S.players[pid], me = S.clubs[c.clubId];
@@ -2927,7 +3151,7 @@
             ${t.counter ? `<button class="btn" data-act="neg-counter" data-id="${pid}">Accept ${money(t.counter)}</button>` : ''}
           </div>
           <p class="muted small">Clubs accept offers at or above their valuation and counter offers that are close. Bids far below it end talks. You get 3 bids per player per window.</p>` : ''}
-        ${!blocker && agreed ? `<div class="row gap wrap mt"><button class="btn primary big" data-act="neg-sign" data-id="${pid}">Sign for ${money(t.agreed || val)} · ${money(wage)}/wk</button></div>` : ''}
+        ${!blocker && agreed ? termsHtml(p, t, 'sign', `Fee agreed: ${fa ? `signing fee ${money(val)}` : money(t.agreed)}. Now agree personal terms.`, 'neg') : ''}
       </div>`);
   }
 
@@ -3264,7 +3488,8 @@
       const pm = ui.startMode === 'player';
       const name = ($('#mgr-name')?.value || '').trim() || (pm ? 'Alex Hunter' : 'The Gaffer');
       const pos = $('#start-pos')?.value || 'ST';
-      const begin = () => { startCareer(ui.startClub, name, { mode: pm ? 'player' : 'manager', pos }); view = 'home'; render(); };
+      const role = $('#start-role')?.value || defaultRole(pos);
+      const begin = () => { startCareer(ui.startClub, name, { mode: pm ? 'player' : 'manager', pos, role }); view = 'home'; render(); };
       if (saved && saved.career) askConfirm('Starting a new career will overwrite your saved career.', begin, 'Start new career');
       else begin();
     },
@@ -3323,6 +3548,38 @@
     },
     'accept-offer': (id) => { const c = C(); const o = c.offers.find((x) => x.id === id); if (!o) return; if (S.clubs[o.clubId].budget < o.amount) { c.offers = c.offers.filter((x) => x !== o); toast('The buyer can no longer afford the deal.', 'bad'); return render(); } sellPlayer(o.pid, o.clubId, o.amount); render(); },
     'reject-offer': (id) => { const c = C(); c.offers = c.offers.filter((x) => x.id !== id); save(); render(); },
+    renew: (id) => renewModal(id),
+    'ren-wage': (id) => { const { wage, years } = wageOfferFromForm(); const t = renewTalk(id); const r = wageTalk(S.players[id], t, wage, years, 'renew'); Object.assign(t.w, { msg: r.msg, status: r.status, lastOffer: wage, lastYears: years }); renewModal(id); },
+    'ren-wage-accept': (id) => { const t = renewTalk(id); t.w.agreed = { wage: t.w.counter, years: t.w.counterYears || 3 }; t.w.msg = 'Terms agreed.'; t.w.status = 'accepted'; renewModal(id); },
+    'ren-complete': (id) => { if (completeRenewal(id)) { closeModal(); render(); } },
+    'neg-wage': (id) => { const { wage, years } = wageOfferFromForm(); const t = talk(id); const r = wageTalk(S.players[id], t, wage, years, 'sign'); Object.assign(t.w, { msg: r.msg, status: r.status, lastOffer: wage, lastYears: years }); negModal(id); },
+    'neg-wage-accept': (id) => { const t = talk(id); t.w.agreed = { wage: t.w.counter, years: t.w.counterYears || 3 }; t.w.msg = 'Terms agreed.'; t.w.status = 'accepted'; negModal(id); },
+    'neg-complete': (id) => { const p = S.players[id]; if (p.clubId === 'FA') talk(id).agreed = clubValuation(p, C().clubId); if (completeSigning(id)) { closeModal(); render(); } },
+    'p-offer-ask': (id) => {
+      const c = C(), o = c.offers.find((x) => x.id === id); if (!o) return;
+      const ask = Math.round((parseFloat($('#ask-' + id).value) || 0) * 1000);
+      if (ask <= 0) return toast('Enter a wage in €K per week.', 'bad');
+      const r = clubWageTalk(o, ask);
+      o.msg = r.msg; o.status = r.status;
+      if (o.withdrawn) { c.offers = c.offers.filter((x) => x !== o); toast(r.msg, 'bad'); }
+      save(); render();
+    },
+    'p-renew-ask': () => {
+      const c = C(), p = me();
+      const starter = roleAt(c.clubId, p).startsWith('Starter');
+      c.pRenew = { season: c.season, id: 'r' + c.season + p.id, wage: niceWage(Math.max(p.wage, wageFor(p) * (starter ? 1.1 : 0.95))), years: p.age <= 23 ? 5 : 3, clubId: c.clubId };
+      news(`${clubName(c.clubId)} offer you a new ${c.pRenew.years}-year deal worth ${money(c.pRenew.wage)} a week.`, 'offer');
+      save(); render();
+    },
+    'p-renew-counter': () => {
+      const c = C(), r = c.pRenew; if (!r) return;
+      const ask = Math.round((parseFloat($('#p-ask-renew').value) || 0) * 1000);
+      const res = clubWageTalk(r, ask);
+      r.msg = res.msg;
+      if (res.status === 'ended') r.withdrawn = true;
+      save(); render();
+    },
+    'p-renew-sign': () => { const c = C(), r = c.pRenew, p = me(); if (!r) return; p.wage = r.wage; p.contract = c.season + r.years; r.done = true; news(`✍️ You signed a new contract until ${contractLabel(p)} on ${money(p.wage)} a week.`, 'good'); save(); render(); toast('New contract signed!', 'good'); },
     'join-offer': (id) => { const o = C().offers.find((x) => x.id === id); if (!o) return; askConfirm(`Join ${clubName(o.clubId)} for ${money(o.amount)} on ${money(o.wage)} a week?`, () => { joinClub(o); go('home'); }, 'Join club'); },
     'request-transfer': () => {
       const c = C();
@@ -3371,6 +3628,11 @@
       ui.squadSel = null; save(); render();
     },
     mentality: (v) => { C().mentality = v; save(); render(); },
+    style: (v) => { C().style = v; save(); render(); },
+    role: (v, el) => { const c = C(); c.roles = c.roles || []; c.roles[+el.dataset.slot] = v; save(); render(); },
+    'my-role': (v) => { me().role = v; save(); render(); toast(`You now play as a ${ROLE[v].label.toLowerCase()}.`, 'good'); },
+    'start-role': (v) => { ui.startRole = v; },
+    'start-pos': (v) => { ui.startPos = v; ui.startRole = null; ui.managerName = $('#mgr-name')?.value || ui.managerName; renderStart(); },
     speed: (v) => { C().speed = v; save(); if (!ui.playback) render(); else if (v === 'instant') finishPlayback(); },
     'fix-filter': (v) => { ui.fixFilter = v; ui.fixDay = null; render(); },
     'fix-day': (v) => { ui.fixDay = +v; render(); },
@@ -3427,7 +3689,7 @@
       r.readAsText(el.files[0]);
       return;
     }
-    if (el.dataset.change && !el.dataset.live && CHANGES[el.dataset.change]) CHANGES[el.dataset.change](el.value);
+    if (el.dataset.change && !el.dataset.live && CHANGES[el.dataset.change]) CHANGES[el.dataset.change](el.value, el);
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
 

@@ -32,6 +32,10 @@ Every match you watch shows a pitch with 22 dots and the ball, driven minute by 
   - Players may refuse to join clubs that are smaller, play in a weaker league or have no European football.
   - Wage demands must fit your wage budget.
   - AI clubs buy and sell among themselves, and bid for your players.
+- **Tactics:** 9 formations, 4 mentalities and 7 play styles: Balanced, Tiki-taka, Gegenpress, Counter-attack, Long ball, Wing play and Park the bus. Each changes possession, attacking rate, chance quality, crossing and cards in the match engine.
+- **Player roles** for every position, e.g. Holding midfielder, Deep-lying playmaker, Box-to-box, Mezzala, Inside forward, Cross specialist, Target man, Poacher, False 9 and Wing-back. Roles change who shoots, who creates, who heads crosses in, and how much each player adds to attack, midfield or defence. Goal commentary changes with the role too.
+- **Player type (player career):** choose how you play (for example a winger who cuts in, or a cross specialist), and change it later in My Career.
+- **Contracts & wage negotiation (both modes):** every player has a contract end date. Manager: agree the fee, then personal terms (wage and contract length) with counter-offers, and renew expiring contracts or the player leaves on a free. Player career: ask clubs for a higher wage (they have a hidden limit and may withdraw), and negotiate a new contract with your own club.
 - **FC 26 ratings import** (CSV/JSON): `Name`/`short_name`/`long_name`, `Club`/`club_name`, `Position`/`player_positions`, `OVR`/`overall`, `Age`, `League`.
 - **Match engine:** a minute-by-minute simulation with live text commentary, stats, player ratings, extra time and penalty shootouts. 9 formations and 4 mentalities.
 - Stats per competition, a trophy cabinet, season history and auto-save.
