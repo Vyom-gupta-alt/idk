@@ -288,15 +288,71 @@
   }
 
   // Top up squads, compute levels & budgets. Safe to call repeatedly.
+  // Real clubs only: not free agency, national teams or the youth academy.
+  const isClub = (cl) => !!cl && cl.id !== 'FA' && !cl.nation && !cl.youth;
   function finalizeWorld(W) {
     for (const p of Object.values(W.players)) ensureFields(p);
     for (const club of Object.values(W.clubs)) {
-      if (club.id === 'FA') continue;
+      if (!isClub(club)) continue;
       club.level = club.pids.length >= 6 ? computeLevel(W, club) : (club.level || 66);
       fillSquad(W, club);
       if (!club.budget) club.budget = initialBudget(W, club);
     }
+    ensureNations(W);
+    if (!W.clubs.YTH) W.clubs.YTH = { id: 'YTH', name: 'Youth academy', short: 'YTH', leagueId: null, pids: [], level: 50, budget: 0, youth: true };
   }
+
+  /* --- Nations: nationality of every player, national-team reserve pools, world ranking (Elo) --- */
+  const NATIONS = Object.fromEntries((D.nations || []).map(([code, name, confed, base, pool]) => [code, { code, name, confed, base, pool }]));
+  const natClubId = (code) => 'N-' + code;
+  const POOL_NAT = { en: 'ENG', es: 'ESP', it: 'ITA', de: 'GER', fr: 'FRA', pt: 'POR', nl: 'NED' };
+  let NAT_INDEX = null;
+  function natIndex() {
+    if (NAT_INDEX) return NAT_INDEX;
+    const byName = new Map(), pinned = new Map();
+    for (const [code, list] of Object.entries(D.natPlayers || {})) {
+      for (const raw of list.split('|')) {
+        const [nm, pin] = raw.split('@');
+        if (pin === 'X') continue;
+        const k = norm(nm);
+        if (pin) pinned.set(k + '@' + pin, code);
+        else if (!byName.has(k)) byName.set(k, code);
+      }
+    }
+    return (NAT_INDEX = { byName, pinned });
+  }
+  function assignNat(W, p) {
+    if (p.nat !== undefined) return;
+    const idx = natIndex(), club = W.clubs[p.clubId], k = norm(p.name);
+    let code = (club && idx.pinned.get(k + '@' + club.short)) || idx.byName.get(k) || null;
+    if (!code && p.gen && club) code = POOL_NAT[club.natPool || W.leagues[club.leagueId]?.pool] || null;
+    p.nat = code;
+  }
+  const NAT_SHAPE = ['GK', 'GK', 'GK', 'CB', 'CB', 'CB', 'CB', 'CB', 'LB', 'LB', 'RB', 'RB', 'CDM', 'CDM', 'CM', 'CM', 'CM', 'CM', 'CAM', 'CAM', 'LW', 'LW', 'RW', 'RW', 'ST', 'ST'];
+  function ensureNations(W) {
+    W.nations = W.nations || {};
+    for (const n of Object.values(NATIONS)) {
+      if (!W.nations[n.code]) W.nations[n.code] = { code: n.code, elo: Math.round(1500 + (n.base - 70) * 40), form: [] };
+      const id = natClubId(n.code);
+      if (!W.clubs[id]) W.clubs[id] = { id, name: n.name, short: n.code, leagueId: null, pids: [], level: n.base - 3, budget: 0, nation: n.code, natPool: n.pool };
+    }
+    for (const p of Object.values(W.players)) assignNat(W, p);
+    // Nations without enough players in the database get generated players (from their domestic leagues).
+    const counts = {};
+    for (const p of Object.values(W.players)) if (p.nat && isClub(W.clubs[p.clubId])) counts[p.nat] = (counts[p.nat] || 0) + 1;
+    for (const n of Object.values(NATIONS)) {
+      const club = W.clubs[natClubId(n.code)];
+      club.pids = club.pids.filter((id) => W.players[id]);
+      const need = 23 - (counts[n.code] || 0) - club.pids.length;
+      const taken = new Set();
+      for (let i = 0; i < need; i++) {
+        const pos = NAT_SHAPE[i % NAT_SHAPE.length];
+        const p = addPlayer(W, { name: genName(n.pool, taken), pos, ovr: n.base - 3 + randInt(-4, 3), age: randInt(20, 32), clubId: club.id, gen: true });
+        p.nat = n.code;
+      }
+    }
+  }
+  const eloOf = (clubId) => S.nations?.[S.clubs[clubId]?.nation]?.elo || 1500;
 
   /* ------------------------------------------------------------------ *
    * Player value & availability
@@ -312,7 +368,7 @@
     return Math.max(10000, niceRound(v));
   }
   const avgRating = (p) => (p.st.apps ? p.st.rsum / p.st.apps : 0);
-  const available = (p) => p && p.inj <= 0 && p.sus <= 0;
+  const available = (p) => p && p.inj <= 0 && p.sus <= 0 && !p.away;
   const eff = (p, slot) => Math.round(p.ovr + fit(p.pos, slot) + clamp(p.form || 0, -2, 2));
 
   /* ------------------------------------------------------------------ *
@@ -320,7 +376,7 @@
    * ------------------------------------------------------------------ */
   function bestXI(pids, formation, opts = {}) {
     const slots = FORMATIONS[formation];
-    const players = pids.map((id) => S.players[id]).filter((p) => p && (opts.ignoreAvail || available(p)));
+    const players = pids.map((id) => S.players[id]).filter((p) => p && (opts.ignoreAvail || available(p) || (opts.nat && p.inj <= 0)));
     const pairs = [];
     const bias = opts.bias || {};
     slots.forEach(([pos], si) => players.forEach((p) => pairs.push([eff(p, pos) + (bias[p.id] || 0), si, p.id])));
@@ -352,7 +408,7 @@
     if (ratingCache.has(clubId)) return ratingCache.get(clubId);
     const club = S.clubs[clubId];
     const f = club.formation || '4-3-3';
-    const xi = bestXI(club.pids, f, { ignoreAvail: true });
+    const xi = bestXI(club.nation ? club.squad || club.pids : club.pids, f, { ignoreAvail: true });
     const r = Math.round(avg(xi.filter(Boolean).map((id) => S.players[id].ovr)));
     ratingCache.set(clubId, r);
     return r;
@@ -407,12 +463,12 @@
     } else {
       style = clubStyle(club);
       if (!club.formation) club.formation = pickFormation(club);
-      formation = club.formation; ids = bestXI(club.pids, formation, { bias: favor ? { [favor]: 3 } : null }); mentality = 'balanced';
+      formation = club.formation; ids = bestXI(club.nation ? club.squad || [] : club.pids, formation, { bias: favor ? { [favor]: 3 } : null, nat: !!club.nation }); mentality = 'balanced';
     }
     const slots = FORMATIONS[formation];
     const xi = [];
     ids.forEach((id, i) => { if (id) xi.push({ pid: id, slot: slots[i][0], si: i, role: roleFor(S.players[id], slots[i][0], roles[i]) }); });
-    const bench = club.pids.filter((id) => !ids.includes(id) && available(S.players[id]))
+    const bench = (club.nation ? club.squad || [] : club.pids).filter((id) => !ids.includes(id) && (club.nation ? S.players[id]?.inj <= 0 : available(S.players[id])))
       .sort((a, b) => (S.players[b].ovr + (b === favor ? 20 : 0)) - (S.players[a].ovr + (a === favor ? 20 : 0))).slice(0, 9);
     return { clubId, name: club.name, short: club.short, formation, mentality, style, xi, bench };
   }
@@ -479,7 +535,7 @@
     const pickW = (t, W, pow, excl, key) => {
       const c = sides[t].xi.filter((x) => x.pid !== excl);
       const wide = key === 'assist' && sty[t].wide;
-      const x = weighted(c, (x) => (W[x.slot] || 0.3) * Math.pow(Math.max(30, eff(S.players[x.pid], x.slot)) / 70, pow)
+      const x = weighted(c, (x) => (W[x.slot] ?? 0.3) * Math.pow(Math.max(30, eff(S.players[x.pid], x.slot)) / 70, pow)
         * (key ? (ROLE[x.role]?.fx[key] ?? 1) : 1) * (wide && ['LW', 'RW', 'LM', 'RM', 'LB', 'RB', 'LWB', 'RWB'].includes(x.slot) ? sty[t].wide : 1));
       return x ? x.pid : null;
     };
@@ -1083,6 +1139,10 @@
       const cup = L.parent ? null : makeCup(lid, Y);
       if (cup) c.comps[cup.id] = cup;
     }
+    ensureNations(S);
+    const intl = makeIntlBreaks(Y);
+    c.comps[intl.id] = intl;
+    for (const def of tournamentDefs(Y, isoAdd(lastLeague, 7))) { const t = makeTournament(def); c.comps[t.id] = t; }
     for (const id of EURO_ORDER) {
       const comp = makeEuro(id, qual[id] || [], Y, lastLeague);
       if (!comp) continue;
@@ -1109,13 +1169,14 @@
     S = deepClone(W);
     finalizeWorld(S);
     invalidate();
-    for (const cl of Object.values(S.clubs)) if (cl.id !== 'FA' && cl.pids.length) cl.formation = pickFormation(cl);
+    for (const cl of Object.values(S.clubs)) if (isClub(cl) && cl.pids.length) cl.formation = pickFormation(cl);
     invalidate();
     const club = S.clubs[clubId];
     let pid = null;
     if (opts.mode === 'player') {
       const p = addPlayer(S, { name: manager || 'You', pos: opts.pos || 'ST', ovr: 64, age: 17, clubId });
       p.pot = randInt(86, 92); p.me = 1; p.wage = niceWage(wageFor(p)); p.contract = 2027;
+      p.nat = NATIONS[opts.nat] ? opts.nat : 'ENG';
       p.role = ROLE[opts.role]?.group === roleGroup(p.pos) ? opts.role : defaultRole(p.pos);
       pid = p.id;
       invalidate();
@@ -1139,6 +1200,7 @@
     }
     setupSeason(2025, qualify(orders, cupWinners));
     S.career.lineup = bestXI(club.pids, S.career.formation);
+    if (!pid) academySetup();
     S.career.wageBudget = niceRound(wageBill() * 1.12);
     if (pid) news(`✍️ ${S.career.manager} (17, ${opts.pos || 'ST'}) signs a first professional contract with ${club.name}. Play well and your OVR will rise.`, 'good');
     else news(`${S.career.manager} is appointed manager of ${club.name}. Transfer budget ${money(club.budget)}, wage budget ${money(S.career.wageBudget)} per week.`, 'info');
@@ -1253,10 +1315,21 @@
     const detailed = comp.type !== 'league' || comp.leagueId === c.leagueId || isUser;
     if (detailed) m.goals = r.goals.map((g) => [g.lbl, g.side, g.pid, g.apid, g.pen ? 1 : 0]);
     m.motm = r.motm;
-    if (detailed) m.st = r.st;
+    if (detailed && comp.type !== 'intl') m.st = r.st;
+    const intl = comp.type === 'intl' || comp.type === 'tourn';
+    if (intl) updateElo(m, comp.type === 'tourn' ? 50 : 30);
     for (const [pid, x] of Object.entries(r.pm)) {
       const p = S.players[pid];
       if (!p) continue;
+      if (intl) {
+        const it = p.intl || (p.intl = [0, 0]);
+        it[0]++; it[1] += x.g;
+        if (comp.type === 'tourn') { const cg = p.cg[comp.id] || (p.cg[comp.id] = [0, 0, 0]); cg[0]++; cg[1] += x.g; cg[2] += x.a; }
+        p.form = clamp((p.form || 0) * 0.7 + (x.rating - 6.6) * 0.5, -2, 2);
+        develop(p, x.rating, p.clubId === uid);
+        if (x.inj) pend.inj.push([pid, x.inj]);
+        continue;
+      }
       p.st.apps++; p.st.goals += x.g; p.st.assists += x.a; p.st.yc += x.yc ? 1 : 0; p.st.rc += x.rc;
       p.st.rsum += x.rating;
       if (pid === r.motm) p.st.motm++;
@@ -1272,6 +1345,10 @@
     if (comp.type === 'euro') {
       const E = EURO[comp.id];
       if (m.hg > m.ag) award(m.h, E.win); else if (m.hg < m.ag) award(m.a, E.win); else { award(m.h, E.draw); award(m.a, E.draw); }
+    }
+    if (intl && c.mode === 'player' && r.pm[c.pid]) {
+      const x = r.pm[c.pid], mine = S.clubs[m.h].nation === me().nat;
+      news(`🌍 ${comp.name}: ${clubName(m.h)} ${m.hg}-${m.ag} ${clubName(m.a)}${m.pens ? ` (${m.pens[0]}-${m.pens[1]} pens)` : ''}. You: rating ${x.rating.toFixed(1)}${x.g ? `, ${x.g} goal${x.g > 1 ? 's' : ''}` : ''}. Caps: ${me().intl[0]}.`, (mine ? m.hg > m.ag : m.ag > m.hg) ? 'good' : 'info');
     }
     if (!isUser) return null;
     const home = m.h === uid;
@@ -1304,6 +1381,7 @@
   function afterRound(comp, ri) {
     const rd = comp.rounds[ri];
     if (rd.pending || !rd.matches.every((m) => m.played)) return;
+    if (comp.type === 'tourn') return afterTournRound(comp, ri);
     const uid = C().clubId;
     if (comp.type === 'cup') {
       const f = LEAGUE_MONEY[comp.leagueId] ?? 0.8;
@@ -1342,6 +1420,8 @@
     let userRes = null;
     for (const [cid, ri] of day.items) {
       const comp = c.comps[cid], rd = comp.rounds[ri];
+      if (comp.type === 'intl' && rd.pending) drawIntlRound(comp, ri);
+      if ((comp.type === 'intl' || comp.type === 'tourn') && !rd.called) callUps(comp, rd, ri);
       if (rd.pending) continue;
       rd.matches.forEach((m, mi) => {
         if (m.played) return;
@@ -1366,6 +1446,7 @@
       S.players[pid].sus = Math.max(S.players[pid].sus, n);
       if (mine(pid)) news(`🟥 ${S.players[pid].name} is suspended for the next match.`, 'bad');
     }
+    if (!isPlayerMode() && playedClubs.has(c.clubId)) academyTraining();
     if (windowInfo().open) { aiTransfers(randInt(1, 3)); maybeIncomingOffer(); }
     c.offers = c.offers.filter((o) => o.until > c.dayIdx && (isPlayerMode() || S.players[o.pid]?.clubId === c.clubId));
     c.dayIdx++;
@@ -1434,6 +1515,11 @@
         if (cup.winner === uid) s.trophies.push(cup.name);
       }
     }
+    s.tourns = Object.values(c.comps).filter((x) => x.type === 'tourn').map((t) => {
+      const top = Object.values(S.players).filter((p) => p.cg[t.id]).sort((a, b) => b.cg[t.id][1] - a.cg[t.id][1])[0];
+      return { name: t.name, winner: t.winner, top: top ? `${top.name} (${top.cg[t.id][1]})` : null };
+    });
+    if (c.mode === 'player') for (const t of Object.values(c.comps)) if (t.type === 'tourn' && t.winner && t.winner === natClubId(me().nat) && t.mySquad) s.trophies.push(t.name);
     for (const id of EURO_ORDER) {
       const comp = c.comps[id];
       if (!comp) continue;
@@ -1484,9 +1570,11 @@
       for (const id of mv.down) S.clubs[id].leagueId = mv.lower;
     }
     c.leagueId = S.clubs[c.clubId].leagueId;
+    for (const p of Object.values(S.players)) if (p.away) p.away = null;
+    if (!isPlayerMode()) academySeasonEnd();
     // Expiring contracts: AI clubs renew or release; your players leave unless you renewed them.
     for (const p of Object.values(S.players)) {
-      if (p.clubId === 'FA' || p.contract > c.season) continue;
+      if (p.clubId === 'FA' || p.contract > c.season || !isClub(S.clubs[p.clubId])) continue;
       if (p.id === c.pid) { p.contract = c.season + 2; p.wage = Math.max(p.wage, wageFor(p)); news(`Your contract has been extended to ${contractLabel(p)} on ${money(p.wage)} a week.`, 'info'); continue; }
       if (p.clubId === c.clubId && !isPlayerMode()) {
         if (S.clubs[c.clubId].pids.length > MIN_SQUAD) { movePlayer(p, 'FA'); news(`👋 ${p.name}'s contract expired and he has left on a free transfer.`, 'bad'); continue; }
@@ -1524,13 +1612,13 @@
     const mine = S.clubs[c.clubId];
     const pool = S.leagues[c.leagueId].pool;
     const taken = new Set(mine.pids.map((id) => S.players[id].name));
-    for (let i = 0; i < (isPlayerMode() ? 0 : 2) && mine.pids.length < MAX_SQUAD; i++) {
+    for (let i = 0; i < 0 && mine.pids.length < MAX_SQUAD; i++) { // graduates now come through the youth academy
       const p = addPlayer(S, { name: genName(pool, taken), pos: pick(['CB', 'CM', 'ST', 'LW', 'RB', 'CAM']), ovr: randInt(58, 67), age: randInt(16, 18), clubId: c.clubId, gen: true });
       p.pot = clamp(p.ovr + randInt(10, 22), p.ovr, 92);
       news(`Academy graduate ${p.name} (${p.pos}, ${p.ovr} OVR) joins the first team.`, 'good');
     }
     for (const club of Object.values(S.clubs)) {
-      if (club.id === 'FA') continue;
+      if (!isClub(club)) continue;
       if (club.id !== c.clubId || isPlayerMode()) fillSquad(S, club, 20);
       else if (club.pids.length < MIN_SQUAD) fillSquad(S, club, MIN_SQUAD);
     }
@@ -1538,7 +1626,7 @@
     invalidate();
     c.seasonOver = false; // lets the summer transfer logic run with the new season's calendar
     aiTransfers(45);
-    for (const club of Object.values(S.clubs)) if (club.id !== 'FA' && (club.id !== c.clubId || isPlayerMode())) club.formation = club.pids.length ? pickFormation(club) : null;
+    for (const club of Object.values(S.clubs)) if (isClub(club) && (club.id !== c.clubId || isPlayerMode())) club.formation = club.pids.length ? pickFormation(club) : null;
     invalidate();
     c.wageBudget = niceRound(Math.max(c.wageBudget || 0, wageBill() * 1.08) * 1.04);
     c.talks = {};
@@ -1551,6 +1639,239 @@
   }
 
   /* ------------------------------------------------------------------ *
+   * International football: breaks, call-ups, tournaments, ranking
+   * ------------------------------------------------------------------ */
+  function makeIntlBreaks(Y) {
+    const rounds = [];
+    const months = [[Y, 8, 4, 10, 'September'], [Y, 9, 9, 15, 'October'], [Y, 10, 12, 18, 'November'], [Y + 1, 2, 23, 29, 'March']];
+    for (const [y, m, a, b, label] of months) {
+      let sat = null;
+      for (let d = a; d <= b && !sat; d++) { const dt = new Date(Date.UTC(y, m, d)); if (dt.getUTCDay() === 6) sat = dt.toISOString().slice(0, 10); }
+      if (!sat) continue;
+      rounds.push({ name: `${label} internationals · match 1`, date: sat, pending: true, matches: [] });
+      rounds.push({ name: `${label} internationals · match 2`, date: isoAdd(sat, 3), pending: true, matches: [] });
+    }
+    return { id: 'INT', type: 'intl', name: 'International breaks', short: 'INTL', teams: Object.keys(NATIONS).map(natClubId), rounds, out: {} };
+  }
+  // Friendlies and qualifiers: nations mostly play opponents from their own confederation and of a similar level.
+  function drawIntlRound(comp, ri) {
+    const rd = comp.rounds[ri];
+    const byConf = {};
+    for (const n of Object.values(NATIONS)) (byConf[n.confed] = byConf[n.confed] || []).push(natClubId(n.code));
+    const left = [];
+    rd.matches = [];
+    for (const list of Object.values(byConf)) {
+      const sorted = list.sort((a, b) => eloOf(b) - eloOf(a) + (rand() - 0.5) * 120);
+      while (sorted.length >= 2) { const a = sorted.shift(), i = Math.min(sorted.length - 1, randInt(0, 2)); rd.matches.push(rand() < 0.5 ? newMatch(a, sorted.splice(i, 1)[0]) : newMatch(sorted.splice(i, 1)[0], a)); }
+      left.push(...sorted);
+    }
+    shuffle(left);
+    while (left.length >= 2) rd.matches.push(newMatch(left.pop(), left.pop()));
+    rd.pending = false;
+  }
+  function natPools() {
+    const m = new Map();
+    for (const p of Object.values(S.players)) {
+      if (!p.nat || S.clubs[p.clubId]?.youth) continue;
+      if (!m.has(p.nat)) m.set(p.nat, []);
+      m.get(p.nat).push(p);
+    }
+    return m;
+  }
+  // The national coach picks the 23 best available players with a balanced spread of positions.
+  function pickSquad(code, pools) {
+    const list = (pools.get(code) || []).filter((p) => p.inj <= 0).sort((a, b) => b.ovr - a.ovr);
+    const need = { GK: 3, DEF: 8, MID: 7, ATT: 5 };
+    const squad = [];
+    for (const p of list) { const l = LINE[p.pos]; if (need[l] > 0) { need[l]--; squad.push(p.id); } }
+    for (const p of list) { if (squad.length >= 23) break; if (!squad.includes(p.id)) squad.push(p.id); }
+    return squad;
+  }
+  function callUps(comp, rd, ri) {
+    const c = C();
+    rd.called = true;
+    const tournStart = comp.type === 'tourn' && ri === 0;
+    if (comp.type === 'tourn' && !tournStart) return;
+    const pools = natPools();
+    const teams = comp.type === 'tourn' ? comp.teams : [...new Set(rd.matches.flatMap((m) => [m.h, m.a]))];
+    const mineAway = [];
+    for (const id of teams) {
+      const club = S.clubs[id];
+      club.squad = pickSquad(club.nation, pools);
+      club.formation = pickFormation({ pids: club.squad });
+      if (comp.type === 'tourn') {
+        for (const pid of club.squad) { const p = S.players[pid]; p.away = comp.id; if (p.clubId === c.clubId && !isPlayerMode()) mineAway.push(`${p.name} (${club.name})`); }
+      }
+      if (isPlayerMode() && club.nation === me().nat && (comp.type === 'tourn' || / 1$/.test(rd.name))) {
+        const inSquad = club.squad.includes(c.pid);
+        const first = inSquad && !(me().intl && me().intl[0]);
+        if (inSquad) news(first ? `🎉 You have been called up to the ${club.name} squad for the first time!` : `🌍 You are in the ${club.name} squad for the ${comp.type === 'tourn' ? comp.name : rd.name.split(' · ')[0]}.`, 'good');
+        else if (comp.type === 'tourn') news(`You were left out of the ${club.name} squad for the ${comp.name}.`, 'bad');
+        if (comp.type === 'tourn') comp.mySquad = inSquad;
+      }
+    }
+    invalidate();
+    if (mineAway.length) news(`🌍 ${comp.name}: ${mineAway.join(', ')} ${mineAway.length > 1 ? 'are' : 'is'} away until ${mineAway.length > 1 ? 'their nations are' : 'his nation is'} knocked out.`, comp.midSeason ? 'bad' : 'info');
+  }
+  function updateElo(m, K) {
+    const nh = S.nations[S.clubs[m.h].nation], na = S.nations[S.clubs[m.a].nation];
+    if (!nh || !na) return;
+    const exp = 1 / (1 + Math.pow(10, (na.elo - nh.elo) / 400));
+    const res = m.w ? (m.w === m.h ? 1 : 0) : m.hg > m.ag ? 1 : m.hg < m.ag ? 0 : 0.5;
+    const gd = Math.abs(m.hg - m.ag), mult = gd <= 1 ? 1 : gd === 2 ? 1.5 : 1.75 + (gd - 3) / 8;
+    const d = Math.round(K * mult * (res - exp));
+    nh.elo += d; na.elo -= d;
+    nh.form = (nh.form || []).concat(res === 1 ? 'W' : res === 0 ? 'L' : 'D').slice(-5);
+    na.form = (na.form || []).concat(res === 0 ? 'W' : res === 1 ? 'L' : 'D').slice(-5);
+  }
+  function topNations(confeds, n, exclude = []) {
+    return Object.values(NATIONS).filter((x) => confeds.includes(x.confed) && !exclude.includes(x.code))
+      .sort((a, b) => S.nations[b.code].elo - S.nations[a.code].elo).slice(0, n).map((x) => x.code);
+  }
+  function tournamentDefs(Y, afterClub) {
+    const Z = Y + 1, defs = [];
+    const summer = (iso) => (iso > afterClub ? iso : isoAdd(afterClub, 3)); // after the club season
+    if (Y === 2025) defs.push({ id: 'AFCON', name: 'Africa Cup of Nations 2025', short: 'AFCON', teams: topNations(['CAF'], 16), groupDates: ['2025-12-21', '2025-12-26', '2025-12-30'], koSize: 8, koDates: ['2026-01-03', '2026-01-09', '2026-01-14'], thirds: 0, midSeason: true });
+    if (Z % 4 === 3) defs.push({ id: 'ASIAN', name: `AFC Asian Cup ${Z}`, short: 'ASIA', teams: topNations(['AFC'], 16), groupDates: [`${Z}-01-08`, `${Z}-01-12`, `${Z}-01-16`], koSize: 8, koDates: [`${Z}-01-21`, `${Z}-01-25`, `${Z}-01-30`], thirds: 0, midSeason: true });
+    if (Z % 4 === 2) {
+      const hosts = Z === 2026 ? ['USA', 'MEX', 'CAN'] : [];
+      let teams = hosts.slice();
+      const add = (conf, n) => { teams.push(...topNations([conf], n, teams)); };
+      add('UEFA', 16); add('CONMEBOL', 6); add('CAF', 9); add('AFC', 8); add('CONCACAF', 6 - hosts.length); add('OFC', 1);
+      teams.push(...topNations(['UEFA', 'CONMEBOL', 'CAF', 'AFC', 'CONCACAF'], 48 - teams.length, teams));
+      defs.push({ id: 'WC', name: `FIFA World Cup ${Z}`, short: 'WC', teams, groupDates: [summer(`${Z}-06-13`), summer(`${Z}-06-17`), summer(`${Z}-06-21`)], koSize: 32, koDates: [`${Z}-06-28`, `${Z}-07-03`, `${Z}-07-09`, `${Z}-07-14`, `${Z}-07-19`], thirds: 8 });
+    }
+    if (Z % 4 === 0) {
+      defs.push({ id: 'EURO', name: `UEFA Euro ${Z}`, short: 'EURO', teams: topNations(['UEFA'], 24), groupDates: [summer(`${Z}-06-10`), summer(`${Z}-06-14`), summer(`${Z}-06-18`)], koSize: 16, koDates: [`${Z}-06-25`, `${Z}-07-01`, `${Z}-07-05`, `${Z}-07-09`], thirds: 4 });
+      defs.push({ id: 'COPA', name: `Copa América ${Z}`, short: 'COPA', teams: topNations(['CONMEBOL'], 10).concat(topNations(['CONCACAF'], 6)), groupDates: [summer(`${Z}-06-13`), summer(`${Z}-06-17`), summer(`${Z}-06-21`)], koSize: 8, koDates: [`${Z}-06-27`, `${Z}-07-01`, `${Z}-07-05`], thirds: 0 });
+    }
+    if (Z % 2 === 1 && Z >= 2027) {
+      defs.push({ id: 'AFCON', name: `Africa Cup of Nations ${Z}`, short: 'AFCON', teams: topNations(['CAF'], 16), groupDates: [summer(`${Z}-06-19`), summer(`${Z}-06-23`), summer(`${Z}-06-27`)], koSize: 8, koDates: [`${Z}-07-02`, `${Z}-07-06`, `${Z}-07-11`], thirds: 0 });
+      defs.push({ id: 'UNL', name: `Nations League Finals ${Z}`, short: 'UNL', teams: topNations(['UEFA'], 4), groupDates: [], koSize: 4, koDates: [summer(`${Z}-06-10`), summer(`${Z}-06-14`)], thirds: 0, noGroups: true });
+    }
+    return defs;
+  }
+  function makeTournament(def) {
+    const teams = def.teams.map(natClubId);
+    const comp = { id: def.id, type: 'tourn', name: def.name, short: def.short, teams, groups: [], rounds: [], out: {}, winner: null, midSeason: !!def.midSeason, thirds: def.thirds };
+    if (!def.noGroups) {
+      const nG = teams.length / 4;
+      const sorted = teams.slice().sort((a, b) => eloOf(b) - eloOf(a));
+      comp.groups = Array.from({ length: nG }, () => []);
+      for (let pot = 0; pot < 4; pot++) shuffle(sorted.slice(pot * nG, pot * nG + nG)).forEach((t, i) => comp.groups[i].push(t));
+      [[[0, 1], [2, 3]], [[0, 2], [1, 3]], [[0, 3], [1, 2]]].forEach((pairs, md) => comp.rounds.push({
+        name: `Group stage · MD${md + 1}`, date: def.groupDates[md], group: true,
+        matches: comp.groups.flatMap((g, gi) => pairs.map(([x, y]) => ({ ...newMatch(g[x], g[y]), g: gi }))),
+      }));
+    }
+    let size = def.koSize;
+    for (const d of def.koDates) { comp.rounds.push({ name: koRoundName(size), date: d, single: true, final: size === 2, pending: true, matches: [], size, ko: true }); size /= 2; }
+    if (def.noGroups) drawTournKO(comp, 0, teams.slice().sort((a, b) => eloOf(b) - eloOf(a)));
+    return comp;
+  }
+  const groupLetter = (i) => String.fromCharCode(65 + i);
+  function groupTable(comp, gi) {
+    return standings(comp.groups[gi], comp.rounds.filter((r) => r.group).flatMap((r) => r.matches.filter((m) => m.g === gi)));
+  }
+  function drawTournKO(comp, ri, seeds) {
+    const rd = comp.rounds[ri];
+    let pairs = [];
+    if (seeds) for (let i = 0; i < seeds.length / 2; i++) pairs.push([seeds[i], seeds[seeds.length - 1 - i]]);
+    else { const w = comp.rounds[ri - 1].matches.map((m) => m.w); for (let i = 0; i + 1 < w.length; i += 2) pairs.push([w[i], w[i + 1]]); }
+    rd.matches = pairs.map(([a, b]) => newMatch(a, b));
+    rd.pending = false;
+  }
+  function releaseNation(comp, clubId) {
+    for (const pid of S.clubs[clubId]?.squad || []) { const p = S.players[pid]; if (p && p.away === comp.id) p.away = null; }
+    invalidate();
+  }
+  function afterTournRound(comp, ri) {
+    const rd = comp.rounds[ri];
+    if (rd.group) {
+      if (!comp.rounds.filter((r) => r.group).every((r) => r.matches.every((m) => m.played))) return;
+      const tables = comp.groups.map((_, gi) => groupTable(comp, gi));
+      const rank = (a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf;
+      const firsts = tables.map((t) => t[0]).sort(rank), seconds = tables.map((t) => t[1]).sort(rank);
+      const thirds = tables.map((t) => t[2]).sort(rank).slice(0, comp.thirds || 0);
+      const seeds = [...firsts, ...seconds, ...thirds].map((r) => r.id);
+      for (const id of comp.teams) if (!seeds.includes(id)) { comp.out[id] = 'Group stage'; releaseNation(comp, id); }
+      const koIdx = comp.rounds.findIndex((r) => r.ko);
+      drawTournKO(comp, koIdx, seeds);
+      return;
+    }
+    for (const m of rd.matches) { const loser = m.w === m.h ? m.a : m.h; comp.out[loser] = rd.name; releaseNation(comp, loser); }
+    if (rd.final) {
+      comp.winner = rd.matches[0].w;
+      releaseNation(comp, comp.winner);
+      news(`🏆 ${clubName(comp.winner)} win the ${comp.name}!`, isPlayerMode() && S.clubs[comp.winner].nation === me().nat && comp.mySquad ? 'good' : 'info');
+    } else drawTournKO(comp, ri + 1);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Youth academy (manager career)
+   * ------------------------------------------------------------------ */
+  const ACADEMY_REGIONS = {
+    local: { label: 'Local area', desc: 'Cheapest. Players from your own country.' },
+    europe: { label: 'Europe', desc: 'Technically strong prospects from across Europe.', pools: ['en', 'es', 'it', 'de', 'fr', 'nl', 'pt'] },
+    samerica: { label: 'South America', desc: 'Flair and high potential, but raw.', nats: ['BRA', 'ARG', 'URU', 'COL', 'ECU'], pool: ['pt', 'es'] },
+    africa: { label: 'Africa', desc: 'Athletic prospects with a big potential range.', nats: ['MAR', 'SEN', 'NGA', 'CIV', 'GHA', 'CMR', 'MLI'], pool: ['fr', 'world'] },
+    asia: { label: 'Asia', desc: 'Disciplined, fast-developing players.', nats: ['JPN', 'KOR', 'UZB', 'AUS'], pool: ['world'] },
+  };
+  const ACADEMY_COST = [0, 4e6, 10e6, 20e6, 35e6];
+  const academy = () => { const c = C(); return c.academy || (c.academy = { level: 1, scouted: 0, season: c.season }); };
+  function genProspect(region) {
+    const c = C(), lvl = academy().level, R = ACADEMY_REGIONS[region] || ACADEMY_REGIONS.local;
+    let pool = S.leagues[c.leagueId].pool, nat = POOL_NAT[pool] || null;
+    if (R.pools) { pool = pick(R.pools); nat = POOL_NAT[pool]; }
+    if (R.nats) { nat = pick(R.nats); pool = pick(R.pool); if (nat === 'BRA') pool = 'pt'; if (['ARG', 'URU', 'COL', 'ECU'].includes(nat)) pool = 'es'; }
+    const age = randInt(15, 17);
+    const ovr = randInt(42, 53) + lvl * 2 + (age - 15) * 2;
+    const spread = region === 'africa' || region === 'samerica' ? 30 : 24;
+    const wonder = rand() < 0.03 + lvl * 0.015;
+    const pot = wonder ? randInt(86, 93) : clamp(ovr + randInt(10, spread) + lvl, ovr + 5, 88);
+    const p = addPlayer(S, { name: genName(pool, null), pos: pick(['GK', 'CB', 'CB', 'LB', 'RB', 'CDM', 'CM', 'CM', 'CAM', 'LW', 'RW', 'ST', 'ST']), ovr, age, clubId: 'YTH', gen: true });
+    p.pot = pot; p.nat = nat; p.wage = 500; p.contract = c.season + 3; p.region = region;
+    if (wonder) news(`⭐ Your scouts are excited about ${p.name} (${p.pos}, ${age}): they think he could become a world-class player.`, 'good');
+    return p;
+  }
+  function academySetup() {
+    const a = academy();
+    for (let i = 0; i < 5; i++) genProspect(i < 4 ? 'local' : pick(['europe', 'samerica', 'africa']));
+    a.season = C().season;
+  }
+  function academyTraining() {
+    const a = academy();
+    for (const pid of S.clubs.YTH.pids) {
+      const p = S.players[pid];
+      if (!p) continue;
+      let g = (0.35 + a.level * 0.1) * (p.age <= 16 ? 1.2 : 1) * (0.6 + rand() * 0.8);
+      if (p.ovr >= p.pot) g *= 0.1;
+      p.xp = (p.xp || 0) + g;
+      while (p.xp >= 8) { p.xp -= 8; p.ovr++; if (p.ovr === 65) news(`🎓 Academy: ${p.name} (${p.pos}) has reached 65 OVR and is ready for first-team football.`, 'good'); }
+    }
+  }
+  function academySeasonEnd() {
+    const c = C(), a = academy();
+    for (const pid of S.clubs.YTH.pids.slice()) {
+      const p = S.players[pid];
+      if (p && p.age >= 18) { S.clubs.YTH.pids = S.clubs.YTH.pids.filter((x) => x !== pid); delete S.players[pid]; news(`👋 Academy: ${p.name} was too old for the academy and was released.`, 'bad'); }
+    }
+    a.scouted = 0; a.season = c.season + 1;
+    const n = 2 + a.level;
+    for (let i = 0; i < n; i++) genProspect('local');
+    news(`🎓 Youth intake day: ${n} new prospects have joined your academy.`, 'good');
+  }
+  function promoteYouth(pid) {
+    const c = C(), p = S.players[pid], me2 = S.clubs[c.clubId];
+    if (me2.pids.length >= MAX_SQUAD) return toast(`Your squad is full (${MAX_SQUAD}). Sell or release someone first.`, 'bad');
+    movePlayer(p, c.clubId);
+    p.wage = wageFor(p); p.contract = c.season + 3; p.ovr0 = p.ovr;
+    news(`🎓 ${p.name} (${p.pos}, ${p.ovr} OVR) has been promoted from the academy on a 3-year deal.`, 'good');
+    save();
+    toast(`${p.name} promoted to the first team!`, 'good');
+  }
+
+  /* ------------------------------------------------------------------ *
    * Transfers: windows, valuations, player interest, negotiation, AI market
    * ------------------------------------------------------------------ */
   function windowInfo() {
@@ -1559,6 +1880,7 @@
     if (c.seasonOver) return { open: true, key: `${Y + 1}-S`, label: 'Summer transfer window open' };
     const d = curDate();
     if (d <= `${Y}-09-01`) return { open: true, key: `${Y}-S`, label: 'Summer window open · closes 1 Sep' };
+    if (d >= `${Y + 1}-06-01`) return { open: true, key: `${Y + 1}-S`, label: 'Summer transfer window open' };
     if (d >= `${Y + 1}-01-01` && d <= `${Y + 1}-02-02`) return { open: true, key: `${Y}-J`, label: 'January window open · closes 2 Feb' };
     return { open: false, key: '', label: d < `${Y + 1}-01-01` ? 'Transfer window closed · opens 1 Jan' : 'Transfer window closed · reopens in the summer' };
   }
@@ -1620,7 +1942,7 @@
     if (from) from.pids = from.pids.filter((id) => id !== p.id);
     p.clubId = toClubId;
     S.clubs[toClubId].pids.push(p.id);
-    if (from && from.id !== 'FA' && (from.id !== C().clubId || isPlayerMode()) && from.pids.length < 18) fillSquad(S, from, 18);
+    if (isClub(from) && (from.id !== C().clubId || isPlayerMode()) && from.pids.length < 18) fillSquad(S, from, 18);
     invalidate();
   }
   function talk(pid) {
@@ -1733,7 +2055,7 @@
   }
   function aiBuyers(p) {
     const c = C();
-    const clubs = Object.values(S.clubs).filter((cl) => cl.id !== 'FA' && cl.id !== c.clubId && cl.pids.length < 32);
+    const clubs = Object.values(S.clubs).filter((cl) => isClub(cl) && cl.id !== c.clubId && cl.pids.length < 32);
     const fits = clubs.filter((cl) => { const r = clubRating(cl.id); return r >= p.ovr - 9 && r <= p.ovr + 5; });
     return shuffle(fits.length ? fits : clubs);
   }
@@ -1802,7 +2124,7 @@
     const c = C(), p = me();
     const fee = niceRound(playerValue(p) * 1.1);
     const cur = prestige(c.clubId);
-    const clubs = Object.values(S.clubs).filter((cl) => cl.id !== 'FA' && cl.id !== c.clubId && cl.pids.length && cl.budget >= fee && !c.offers.some((o) => o.clubId === cl.id));
+    const clubs = Object.values(S.clubs).filter((cl) => isClub(cl) && cl.id !== c.clubId && cl.pids.length && cl.budget >= fee && !c.offers.some((o) => o.clubId === cl.id));
     const fits = clubs.filter((cl) => { const r = clubRating(cl.id); return r >= p.ovr - 7 && r <= p.ovr + 3 && prestige(cl.id) >= cur - 6; });
     fits.sort((a, b) => prestige(b.id) - prestige(a.id));
     return shuffle(fits.slice(0, 8)).slice(0, n).map((cl) => ({
@@ -1829,7 +2151,7 @@
   // AI clubs strengthen their weakest position by buying from clubs of similar or lower stature.
   function aiTransfers(n) {
     const c = C();
-    const clubs = Object.values(S.clubs).filter((cl) => cl.id !== 'FA' && (isPlayerMode() || cl.id !== c.clubId) && cl.budget > 3e6 && cl.pids.length);
+    const clubs = Object.values(S.clubs).filter((cl) => isClub(cl) && (isPlayerMode() || cl.id !== c.clubId) && cl.budget > 3e6 && cl.pids.length);
     const all = Object.values(S.players);
     for (let i = 0; i < n; i++) {
       const buyer = weighted(clubs, (cl) => Math.sqrt(cl.budget));
@@ -1844,7 +2166,7 @@
       let best = null, bs = -1e9, fee = 0;
       for (let t = 0; t < 250; t++) {
         const p = all[Math.floor(rand() * all.length)];
-        if (!p || !S.players[p.id] || p.clubId === buyer.id || (isPlayerMode() ? p.id === c.pid : p.clubId === c.clubId)) continue;
+        if (!p || !S.players[p.id] || p.clubId === buyer.id || (isPlayerMode() ? p.id === c.pid : p.clubId === c.clubId) || (p.clubId !== 'FA' && !isClub(S.clubs[p.clubId]))) continue;
         if (fit(p.pos, pos) < -1 || p.ovr < we + 2 || p.ovr > we + 12 || p.age > 31) continue;
         if (p.clubId !== 'FA' && (prestige(p.clubId) > bp + 2 || isUntouchable(p))) continue;
         const f = p.clubId === 'FA' ? niceRound(playerValue(p) * 0.3) : niceRound(clubValuation(p, buyer.id) * (0.95 + rand() * 0.15));
@@ -1955,7 +2277,7 @@
     if (!name) return null;
     const n = norm(name);
     const target = CLUB_ALIAS[n] || n;
-    const clubs = Object.values(state.clubs).filter((c) => c.id !== 'FA');
+    const clubs = Object.values(state.clubs).filter((c) => isClub(c));
     let hit = clubs.find((c) => norm(c.name) === target) || clubs.find((c) => clubKey(c.name) === clubKey(target) && clubKey(target));
     if (hit) return hit;
     const toks = clubKey(target).split(' ').filter((t) => t.length >= 4);
@@ -2136,14 +2458,49 @@
   const serialize = (o) => JSON.stringify(o, function (k, v) {
     if (typeof v === 'number' && !Number.isInteger(v)) return Math.round(v * 100) / 100;
     if ((v === 0 || v === false) && ((P_ZERO.has(k) && this.pos && 'clubId' in this) || (ST_ZERO.has(k) && 'rsum' in this))) return undefined;
+    if (this && this.pos && 'clubId' in this && ((k === 'ovr0' && v === this.ovr) || (k === 'cg' && !Object.keys(v).length) || v === null)) return undefined;
     return v;
   });
+  // Saves are gzip-compressed (built into modern browsers) so long careers fit in browser storage.
+  const META_KEY = SAVE_KEY + '_meta';
+  async function packSave(text) {
+    if (typeof CompressionStream === 'undefined') return 'J' + text;
+    const buf = new Uint8Array(await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    return 'G' + btoa(bin);
+  }
+  async function unpackSave(str) {
+    if (!str) return null;
+    if (str[0] === '{') return JSON.parse(str); // saves from older versions
+    if (str[0] === 'J') return JSON.parse(str.slice(1));
+    const bytes = Uint8Array.from(atob(str.slice(1)), (ch) => ch.charCodeAt(0));
+    return JSON.parse(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text());
+  }
+  function careerMeta(st) {
+    const c = st.career;
+    return { mode: c.mode || 'manager', pname: c.pid ? st.players[c.pid]?.name : null, club: st.clubs[c.clubId]?.name, league: st.leagues[c.leagueId]?.name, season: c.season, seasonOver: c.seasonOver, date: c.days?.[c.dayIdx]?.date || null };
+  }
+  let saveChain = Promise.resolve();
   function save() {
     if (!S || !S.career) return;
-    try { localStorage.setItem(SAVE_KEY, serialize(S)); } catch (e) { toast('Could not save the game (browser storage unavailable or full).', 'bad'); }
+    const text = serialize(S), meta = JSON.stringify(careerMeta(S));
+    saveChain = saveChain.then(() => packSave(text)).then((packed) => {
+      localStorage.setItem(SAVE_KEY, packed);
+      localStorage.setItem(META_KEY, meta);
+    }).catch(() => toast('Could not save the game (browser storage unavailable or full).', 'bad'));
   }
-  function loadCareer() {
-    try { const t = localStorage.getItem(SAVE_KEY); return t ? JSON.parse(t) : null; } catch (e) { return null; }
+  function loadMeta() {
+    try {
+      const m = localStorage.getItem(META_KEY);
+      if (m) return JSON.parse(m);
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (raw && raw[0] === '{') { const st = JSON.parse(raw); return st.career ? careerMeta(st) : null; }
+    } catch (e) { /* storage unavailable */ }
+    return null;
+  }
+  async function loadCareer() {
+    try { await saveChain; return await unpackSave(localStorage.getItem(SAVE_KEY)); } catch (e) { return null; }
   }
   function saveWorld() {
     try { localStorage.setItem(WORLD_KEY, JSON.stringify(W)); } catch (e) { toast('Could not store the imported database in the browser.', 'bad'); }
@@ -2194,7 +2551,9 @@
     const hue = [...club.id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 360, 7);
     return `<span class="crest ${size}" style="--h:${hue}">${esc((club.short || club.name).slice(0, 4))}</span>`;
   };
-  const statusIcons = (p) => (p.inj > 0 ? `<span class="tag bad" title="Injured for ${p.inj} match(es)">INJ ${p.inj}</span>` : '') + (p.sus > 0 ? '<span class="tag warn" title="Suspended">SUS</span>' : '');
+  const statusIcons = (p) => (p.inj > 0 ? `<span class="tag bad" title="Injured for ${p.inj} match(es)">INJ ${p.inj}</span>` : '') + (p.sus > 0 ? '<span class="tag warn" title="Suspended">SUS</span>' : '') + (p.away ? '<span class="tag intl" title="Away on international duty">INTL</span>' : '');
+  const unavailWhy = (p) => (!p ? 'unavailable' : p.inj > 0 ? 'injured' : p.away ? 'away on international duty' : 'suspended');
+  const natTag = (code) => (code && NATIONS[code] ? `<span class="nat" title="${esc(NATIONS[code].name)}">${code}</span>` : '');
   const formDots = (f) => f.slice(-5).map((r) => `<span class="fd fd-${r}">${r}</span>`).join('');
   const playerLink = (p) => `<button class="link" data-act="player" data-id="${p.id}">${esc(p.name)}</button>`;
   const genTag = (p) => (p.gen && p.age <= 21 ? '<span class="tag gen" title="Generated youth player">Academy</span>' : '');
@@ -2217,7 +2576,7 @@
    * ------------------------------------------------------------------ */
   function renderStart() {
     clearTimers();
-    const saved = loadCareer();
+    const sc = loadMeta();
     const selL = ui.startLeague && W.leagues[ui.startLeague];
     const pm = ui.startMode === 'player';
     let clubsHtml = '';
@@ -2234,7 +2593,6 @@
             <span class="cc-stars">${stars(r)}</span>
           </button>`).join('')}</div>`;
     }
-    const sc = saved && saved.career;
     const leagueCards = (tier) => W.leagueOrder.map((id) => W.leagues[id]).filter((l) => (l.tier || 1) === tier).map((l) => `
       <button class="league-card ${ui.startLeague === l.id ? 'sel' : ''}" data-act="start-league" data-id="${l.id}">
         <span class="lc-name">${esc(l.name)}</span><span class="muted small">${esc(l.country || 'Custom')} · ${l.clubIds.length} clubs</span>
@@ -2250,7 +2608,7 @@
           <div class="card continue">
             <div>
               <div class="muted small">Saved ${sc.mode === 'player' ? 'player' : 'manager'} career</div>
-              <strong>${sc.mode === 'player' ? `${esc(saved.players[sc.pid]?.name)} · ` : ''}${esc(saved.clubs[sc.clubId]?.name)}</strong> · ${esc(saved.leagues[sc.leagueId]?.name)} · ${seasonLabel(sc.season)} · ${sc.seasonOver ? 'Season complete' : fmtDate(sc.days[sc.dayIdx]?.date, true)}
+              <strong>${sc.pname ? `${esc(sc.pname)} · ` : ''}${esc(sc.club)}</strong> · ${esc(sc.league)} · ${seasonLabel(sc.season)} · ${sc.seasonOver || !sc.date ? 'Season complete' : fmtDate(sc.date, true)}
             </div>
             <div class="row gap">
               <button class="btn primary" data-act="continue">Continue career</button>
@@ -2268,6 +2626,7 @@
             <input class="input" id="mgr-name" maxlength="30" placeholder="${pm ? 'Player name' : 'Your name'}" value="${esc(ui.managerName)}">
             ${pm ? `<label class="inline">Position <select class="input" id="start-pos" data-change="start-pos">${POSITIONS.map((x) => `<option ${x === (ui.startPos || 'ST') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
               <label class="inline">Player type <select class="input" id="start-role" data-change="start-role">${ROLE_GROUPS[roleGroup(ui.startPos || 'ST')].map(([id, label]) => `<option value="${id}" ${ui.startRole === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+              <label class="inline">Nationality <select class="input" id="start-nat" data-change="start-nat">${Object.values(NATIONS).sort((a, b) => a.name.localeCompare(b.name)).map((n) => `<option value="${n.code}" ${(ui.startNat || 'ENG') === n.code ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}</select></label>
               <span class="muted small">Starts at 64 OVR, age 17, with high potential.</span>` : ''}
           </div>
           <h2 class="step"><span>3</span> Choose a league</h2>
@@ -2286,8 +2645,8 @@
   /* ------------------------------------------------------------------ *
    * Game shell
    * ------------------------------------------------------------------ */
-  const TABS = [['home', 'Home'], ['match', 'Match'], ['squad', 'Squad & Tactics'], ['transfers', 'Transfers'], ['fixtures', 'Fixtures'], ['comps', 'Competitions'], ['stats', 'Stats'], ['data', 'Data']];
-  const TABS_PLAYER = [['home', 'Home'], ['match', 'Match'], ['career', 'My Career'], ['club', 'Club'], ['fixtures', 'Fixtures'], ['comps', 'Competitions'], ['stats', 'Stats'], ['data', 'Data']];
+  const TABS = [['home', 'Home'], ['match', 'Match'], ['squad', 'Squad & Tactics'], ['transfers', 'Transfers'], ['academy', 'Academy'], ['fixtures', 'Fixtures'], ['comps', 'Competitions'], ['intl', 'International'], ['stats', 'Stats'], ['data', 'Data']];
+  const TABS_PLAYER = [['home', 'Home'], ['match', 'Match'], ['career', 'My Career'], ['club', 'Club'], ['fixtures', 'Fixtures'], ['comps', 'Competitions'], ['intl', 'International'], ['stats', 'Stats'], ['data', 'Data']];
   function render() {
     if (!S || !S.career) return renderStart();
     if (view !== 'match' || !ui.playback) clearTimers();
@@ -2295,7 +2654,7 @@
     const win = windowInfo();
     const date = c.seasonOver ? 'Season complete' : fmtDate(curDate(), true);
     const pm = isPlayerMode(), p = pm ? me() : null;
-    if (pm && ['squad', 'transfers'].includes(view)) view = 'home';
+    if (pm && ['squad', 'transfers', 'academy'].includes(view)) view = 'home';
     if (!pm && ['career', 'club'].includes(view)) view = 'home';
     app().innerHTML = `
       <header class="topbar">
@@ -2323,6 +2682,8 @@
       case 'data': return viewData();
       case 'career': return viewCareer();
       case 'club': return viewClub();
+      case 'academy': return viewAcademy();
+      case 'intl': return viewIntl();
       default: return isPlayerMode() ? viewHomePlayer() : viewHome();
     }
   }
@@ -2440,6 +2801,7 @@
         ${s.promoted ? `<div class="notice good">🎉 Promoted to the ${esc(s.promoted)}!</div>` : ''}${s.relegated ? `<div class="notice">⬇️ Relegated to the ${esc(s.relegated)}.</div>` : ''}
         ${s.me ? `<h4>Your season</h4><div class="stats-row"><div class="big-stat"><span>Apps</span><strong>${s.me.apps}</strong></div><div class="big-stat"><span>Goals · Assists</span><strong>${s.me.g} · ${s.me.a}</strong></div><div class="big-stat"><span>Avg rating</span><strong>${s.me.avg}</strong></div><div class="big-stat"><span>OVR</span><strong>${s.me.ovr0} → ${s.me.ovr}</strong></div></div>` : ''}
         ${(s.moves || []).length ? `<h4>Promotion & relegation</h4><ul class="plist">${s.moves.map((mv) => `<li><span>⬆️ ${mv.up.map((id) => esc(clubName(id))).join(', ')}<br>⬇️ ${mv.down.map((id) => esc(clubName(id))).join(', ')}</span><span class="ml-auto muted small">${esc(S.leagues[mv.upper].name)} ↔ ${esc(S.leagues[mv.lower].name)}</span></li>`).join('')}</ul>` : ''}
+        ${(s.tourns || []).length ? `<h4>International tournaments</h4><div class="stats-row">${s.tourns.map((t) => `<div class="big-stat"><span>${esc(t.name)}</span><strong>${t.winner ? '🏆 ' + esc(clubName(t.winner)) : '—'}</strong>${t.top ? `<small>Top scorer: ${esc(t.top)}</small>` : ''}</div>`).join('')}</div>` : ''}
         <h4>European winners</h4>
         <div class="stats-row">${s.euro.map((e) => win(e.name, e.winner)).join('')}</div>
         <h4>League champions & cup winners</h4>
@@ -2517,7 +2879,7 @@
         <div class="odds"><div style="flex:${pw[0] || 1}" class="o-w">Win ${pw[0]}%</div><div style="flex:${pw[1] || 1}" class="o-d">Draw ${pw[1]}%</div><div style="flex:${pw[2] || 1}" class="o-l">Loss ${pw[2]}%</div></div>
         ${opts.ko ? `<p class="center small">Knockout: a level ${opts.agg ? 'aggregate' : 'score'} goes to extra time and penalties. Chance to go through: <strong>${advance}%</strong></p>` : ''}
         ${between ? `<div class="notice info">${between} other match day${between > 1 ? 's' : ''} before this fixture will be simulated first.</div>` : ''}
-        ${covers.length ? `<div class="notice">${covers.map((cv) => `${esc(S.players[cv.out]?.name || '?')} is ${S.players[cv.out]?.inj > 0 ? 'injured' : 'suspended'}${cv.in ? `, so ${esc(S.players[cv.in].name)} covers at ${cv.pos}` : ''}`).join('. ')}. Your chosen XI comes back automatically when players are available.</div>` : ''}
+        ${covers.length ? `<div class="notice">${covers.map((cv) => `${esc(S.players[cv.out]?.name || '?')} is ${unavailWhy(S.players[cv.out])}${cv.in ? `, so ${esc(S.players[cv.in].name)} covers at ${cv.pos}` : ''}`).join('. ')}. Your chosen XI comes back automatically when players are available.</div>` : ''}
         ${pm ? (() => { const mySide = nm.m.h === uid ? H : A; const inXi = mySide.xi.find((x) => x.pid === c.pid); const p = me(); return `<div class="notice ${inXi ? 'good' : 'info'}">${!available(p) ? `You are ${p.inj > 0 ? `injured (${p.inj} match${p.inj > 1 ? 'es' : ''})` : 'suspended'} and will miss this match.` : inXi ? `You are in the starting XI at <strong>${inXi.slot}</strong>.` : 'You start on the bench. Impress in training and you may come on in the second half.'}</div>`; })() : ''}
         <div class="row gap wrap center">
           ${pm ? '' : `<label class="inline">Play style
@@ -2809,6 +3171,7 @@
             <div class="big-stat"><span>Role</span><strong>${esc(playerRole())}</strong></div>
             <div class="big-stat"><span>Player type</span><strong>${esc(ROLE[p.role]?.label || '—')}</strong></div>
             <div class="big-stat"><span>Contract</span><strong>${contractLabel(p)}</strong></div>
+            <div class="big-stat"><span>${esc(NATIONS[p.nat]?.name || 'International')}</span><strong>${(p.intl || [0, 0])[0]} caps · ${(p.intl || [0, 0])[1]} goals</strong></div>
             <div class="big-stat"><span>Potential</span><strong>${potRange(p)}</strong></div>
             <div class="big-stat"><span>Value</span><strong class="money">${money(playerValue(p))}</strong></div>
             <div class="big-stat"><span>Wage</span><strong class="money">${money(p.wage)}/wk</strong></div>
@@ -2945,7 +3308,7 @@
       const e = eff(p, pos);
       const cv = coverBy[i];
       return `<button class="chip ${ui.squadSel === i ? 'sel' : ''} ${fit(p.pos, pos) < 0 ? 'oop' : ''} ${cv ? 'out' : ''}" style="left:${x}%;top:${y}%" data-act="slot" data-id="${i}" title="${esc(p.name)} (${p.pos}) playing ${pos}">
-        <span class="chip-r ${ovrClass(e)}">${e}</span><span class="chip-n">${esc(p.name.split(' ').slice(-1)[0])}</span><span class="chip-p">${cv ? (p.inj > 0 ? 'INJURED' : 'SUSPENDED') : `${pos} · ${c.roles[i].toUpperCase()}`}</span>
+        <span class="chip-r ${ovrClass(e)}">${e}</span><span class="chip-n">${esc(p.name.split(' ').slice(-1)[0])}</span><span class="chip-p">${cv ? unavailWhy(p).split(' ')[0].toUpperCase() : `${pos} · ${c.roles[i].toUpperCase()}`}</span>
         ${cv && cv.in ? `<span class="chip-cover">↳ ${esc(S.players[cv.in].name.split(' ').slice(-1)[0])}</span>` : ''}</button>`;
     }).join('');
     const sorters = {
@@ -3009,7 +3372,7 @@
     c.lineup[slotIdx] = pid;
     ui.squadSel = null;
     const p = S.players[pid];
-    if (!available(p)) toast(`${p.name} is ${p.inj > 0 ? 'injured' : 'suspended'}. A stand-in will cover until he is available.`, 'info');
+    if (!available(p)) toast(`${p.name} is ${unavailWhy(p)}. A stand-in will cover until he is available.`, 'info');
     save();
     render();
   }
@@ -3021,7 +3384,7 @@
   function viewTransfers() {
     const c = C(), me = S.clubs[c.clubId], f = ui.market, win = windowInfo();
     const q = norm(f.q);
-    let list = Object.values(S.players).filter((p) => p.clubId !== c.clubId && S.clubs[p.clubId]);
+    let list = Object.values(S.players).filter((p) => p.clubId !== c.clubId && (p.clubId === 'FA' || isClub(S.clubs[p.clubId])));
     if (f.league === 'FA') list = list.filter((p) => p.clubId === 'FA');
     else if (f.league !== 'ALL') list = list.filter((p) => S.clubs[p.clubId].leagueId === f.league);
     if (f.pos !== 'ALL') list = list.filter((p) => (['DEF', 'MID', 'ATT'].includes(f.pos) ? LINE[p.pos] === f.pos : p.pos === f.pos));
@@ -3164,6 +3527,7 @@
       ['Leagues', Object.values(c.comps).filter((x) => x.type === 'league')],
       ['Domestic cups', Object.values(c.comps).filter((x) => x.type === 'cup')],
       ['Europe', EURO_ORDER.map((k) => c.comps[k]).filter(Boolean)],
+      ['International', Object.values(c.comps).filter((x) => x.type === 'intl' || x.type === 'tourn')],
     ];
     return (includeMine ? `<option value="mine" ${selected === 'mine' ? 'selected' : ''}>Your competitions</option><option value="all" ${selected === 'all' ? 'selected' : ''}>Everything</option>` : '')
       + groups.map(([g, list]) => `<optgroup label="${g}">${list.map((x) => `<option value="${x.id}" ${selected === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</optgroup>`).join('');
@@ -3280,6 +3644,7 @@
     const comp = c.comps[sel];
     let body = '';
     if (comp.type === 'league') body = leagueTableHtml(comp.leagueId);
+    else if (comp.type === 'intl' || comp.type === 'tourn') body = intlCompHtml(comp);
     else if (comp.type === 'cup') {
       body = `${comp.winner ? `<div class="notice good">🏆 ${esc(clubName(comp.winner))} won the ${esc(comp.name)}.</div>` : ''}
         <p class="muted small">Single-match knockout for all ${comp.teams.length} clubs from the ${[comp.leagueId, ...childLeagues(comp.leagueId)].map((l) => esc(S.leagues[l].name)).join(' and ')}. Draws go to extra time and penalties. ${comp.prelim.length ? `The ${comp.prelim.length} lowest-rated clubs play a first round.` : ''}</p>
@@ -3316,8 +3681,112 @@
         <div class="comp-pick"><span class="muted small">Leagues</span><div class="subtabs">${chips(all.filter((x) => x.type === 'league'))}</div></div>
         <div class="comp-pick"><span class="muted small">Cups</span><div class="subtabs">${chips(all.filter((x) => x.type === 'cup'))}</div></div>
         <div class="comp-pick"><span class="muted small">Europe</span><div class="subtabs">${chips(EURO_ORDER.map((k) => c.comps[k]).filter(Boolean))}</div></div>
+        <div class="comp-pick"><span class="muted small">Nations</span><div class="subtabs">${chips(all.filter((x) => x.type === 'intl' || x.type === 'tourn'))}</div></div>
       </section>
       <section class="card"><h3>${compTag(comp)} ${esc(comp.name)} ${seasonLabel(c.season)}</h3>${body}</section>`;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * International & youth academy views
+   * ------------------------------------------------------------------ */
+  function intlCompHtml(comp) {
+    const c = C();
+    const myNat = isPlayerMode() ? natClubId(me().nat) : null;
+    if (comp.type === 'intl') {
+      const played = comp.rounds.map((rd, ri) => [rd, ri]).filter(([rd]) => !rd.pending);
+      const upcoming = comp.rounds.filter((rd) => rd.pending).map((rd) => `<li>${fmtDate(rd.date, true)} · ${esc(rd.name)}</li>`).join('');
+      return `<p class="muted small">During each international break every nation plays two matches, mostly against opponents from its own confederation. Results move the world ranking, which decides who qualifies for tournaments.</p>
+        ${upcoming ? `<h4>Coming up</h4><ul class="plist">${upcoming}</ul>` : ''}
+        ${played.reverse().map(([rd, ri]) => roundListHtml(comp, rd, ri)).join('') || '<p class="muted">No international matches played yet this season.</p>'}`;
+    }
+    const groups = comp.groups.map((g, gi) => {
+      const t = groupTable(comp, gi);
+      return `<div class="grp"><h4>Group ${groupLetter(gi)}</h4><table class="tbl compact"><tbody>${t.map((r, i) => `<tr class="${r.id === myNat ? 'me' : ''}"><td>${i + 1}</td><td class="left">${esc(clubName(r.id))}</td><td>${r.p}</td><td>${r.gf - r.ga > 0 ? '+' : ''}${r.gf - r.ga}</td><td><strong>${r.pts}</strong></td></tr>`).join('')}</tbody></table></div>`;
+    }).join('');
+    const ko = comp.rounds.map((rd, ri) => [rd, ri]).filter(([rd]) => rd.ko).map(([rd, ri]) => roundListHtml(comp, rd, ri)).reverse().join('');
+    const first = comp.rounds[0]?.date, last = comp.rounds[comp.rounds.length - 1]?.date;
+    const top = Object.values(S.players).filter((p) => p.cg[comp.id] && p.cg[comp.id][1]).sort((a, b) => b.cg[comp.id][1] - a.cg[comp.id][1]).slice(0, 5);
+    return `${comp.winner ? `<div class="notice good">🏆 ${esc(clubName(comp.winner))} won the ${esc(comp.name)}.</div>` : ''}
+      <p class="muted small">${fmtDate(first, true)} – ${fmtDate(last, true)} · ${comp.teams.length} nations${comp.midSeason ? '. <strong>Played during the club season:</strong> called-up players miss their clubs\' matches until their nation is knocked out.' : '.'}</p>
+      ${top.length ? `<p class="small">Top scorers: ${top.map((p) => `${esc(p.name)} ${natTag(p.nat)} <strong>${p.cg[comp.id][1]}</strong>`).join(' · ')}</p>` : ''}
+      ${groups ? `<div class="groups">${groups}</div>` : ''}
+      <h4>Knockout rounds</h4>${ko}`;
+  }
+  function viewIntl() {
+    const c = C();
+    const tourns = Object.values(c.comps).filter((x) => x.type === 'tourn');
+    const intl = c.comps.INT;
+    const sel = ui.intlSel && c.comps[ui.intlSel] ? c.comps[ui.intlSel] : tourns.find((t) => !t.winner) || intl;
+    const ranking = Object.values(NATIONS).map((n) => ({ n, e: S.nations[n.code].elo, f: S.nations[n.code].form || [] })).sort((a, b) => b.e - a.e);
+    const pools = natPools();
+    let mine = '';
+    if (isPlayerMode()) {
+      const p = me(), club = S.clubs[natClubId(p.nat)];
+      const squad = club.squad || [];
+      const rank = ranking.findIndex((r) => r.n.code === p.nat) + 1;
+      const pool = (pools.get(p.nat) || []).sort((a, b) => b.ovr - a.ovr);
+      const place = pool.findIndex((x) => x.id === p.id) + 1;
+      mine = `<section class="card"><h3>${natTag(p.nat)} ${esc(NATIONS[p.nat].name)} <span class="muted small">world ranking ${ordinal(rank)}</span></h3>
+        <div class="stats-row"><div class="big-stat"><span>Your caps</span><strong>${(p.intl || [0, 0])[0]}</strong></div><div class="big-stat"><span>International goals</span><strong>${(p.intl || [0, 0])[1]}</strong></div><div class="big-stat"><span>Squad status</span><strong>${squad.includes(p.id) ? 'In the current squad' : `Not selected · ${ordinal(place)} best ${p.pos} option`}</strong></div></div>
+        <p class="muted small">The coach picks the 23 best available players with a balance of positions. Raise your OVR to force your way in.</p></section>`;
+    } else {
+      const club = S.clubs[c.clubId];
+      const internationals = club.pids.map((id) => S.players[id]).filter((p) => p.nat && NATIONS[p.nat]).sort((a, b) => (b.intl?.[0] || 0) - (a.intl?.[0] || 0) || b.ovr - a.ovr);
+      mine = `<section class="card"><h3>Your internationals</h3><p class="muted small">Players picked by their national team play during international breaks and can come back injured. At tournaments in the club season (e.g. AFCON or the Asian Cup) they miss club matches until their nation is knocked out.</p>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th class="left">Player</th><th>Nation</th><th>OVR</th><th>Caps</th><th>Goals</th><th>Status</th></tr></thead><tbody>
+        ${internationals.map((p) => `<tr><td class="left">${posBadge(p.pos)} ${playerLink(p)}</td><td>${natTag(p.nat)}</td><td>${ovrBadge(p.ovr)}</td><td>${p.intl?.[0] || 0}</td><td>${p.intl?.[1] || 0}</td><td>${p.away ? `<span class="tag intl">Away · ${esc(c.comps[p.away]?.short || 'INTL')}</span>` : (S.clubs[natClubId(p.nat)].squad || []).includes(p.id) ? '<span class="tag">In squad</span>' : '<span class="muted small">—</span>'}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">None of your players has a registered nationality.</td></tr>'}
+        </tbody></table></div></section>`;
+    }
+    return `
+      <section class="card">
+        <h3>🌍 International football ${seasonLabel(c.season)}</h3>
+        <div class="tourn-cards">
+          ${tourns.map((t) => `<button class="tourn-card ${sel === t ? 'sel' : ''}" data-act="intl-sel" data-id="${t.id}"><strong>${esc(t.name)}</strong><span class="muted small">${fmtDate(t.rounds[0].date)} – ${fmtDate(t.rounds[t.rounds.length - 1].date)}</span><span class="small">${t.winner ? `🏆 ${esc(clubName(t.winner))}` : t.rounds.some((r) => r.matches.some((m) => m.played)) ? 'In progress' : 'Upcoming'}</span></button>`).join('')}
+          ${intl ? `<button class="tourn-card ${sel === intl ? 'sel' : ''}" data-act="intl-sel" data-id="INT"><strong>International breaks</strong><span class="muted small">Sep · Oct · Nov · Mar</span><span class="small">${intl.rounds.filter((r) => r.matches.some((m) => m.played)).length}/${intl.rounds.length} match days played</span></button>` : ''}
+        </div>
+        ${!tourns.length ? '<p class="muted small">No major tournament this season. The World Cup is played every 4 years (2026, 2030…), the Euros and Copa América in 2028, and AFCON and the Nations League Finals in odd years.</p>' : ''}
+      </section>
+      ${sel ? `<section class="card"><h3>${esc(sel.name)}</h3>${intlCompHtml(sel)}</section>` : ''}
+      <div class="grid g2">
+        ${mine}
+        <section class="card"><h3>World ranking</h3><div class="tbl-wrap"><table class="tbl compact"><thead><tr><th>#</th><th class="left">Nation</th><th>Conf.</th><th>Points</th><th>Form</th></tr></thead><tbody>
+          ${ranking.slice(0, 40).map((r, i) => `<tr class="${isPlayerMode() && r.n.code === me().nat ? 'me' : ''}"><td>${i + 1}</td><td class="left">${natTag(r.n.code)} ${esc(r.n.name)}</td><td class="small muted">${r.n.confed}</td><td>${r.e}</td><td>${formDots(r.f)}</td></tr>`).join('')}
+        </tbody></table></div></section>
+      </div>`;
+  }
+  function viewAcademy() {
+    const c = C(), a = academy();
+    const youth = S.clubs.YTH.pids.map((id) => S.players[id]).filter(Boolean).sort((x, y) => y.pot - x.pot);
+    const upCost = a.level < 5 ? niceRound(ACADEMY_COST[a.level] * leagueFactor()) : 0;
+    const scoutCost = niceRound(0.4e6 * leagueFactor());
+    const width = Math.max(1, 6 - a.level);
+    const potR = (p) => `${Math.max(p.ovr, p.pot - width)}–${Math.min(95, p.pot + width)}`;
+    return `
+      <div class="grid g2">
+        <section class="card">
+          <h3>🎓 Youth academy</h3>
+          <div class="stats-row">
+            <div class="big-stat"><span>Facilities</span><strong>${'★'.repeat(a.level)}<span class="dim">${'★'.repeat(5 - a.level)}</span></strong><small>Level ${a.level} of 5</small></div>
+            <div class="big-stat"><span>Prospects</span><strong>${youth.length}</strong></div>
+            <div class="big-stat"><span>Scouting this season</span><strong>${a.scouted}/3 missions</strong></div>
+          </div>
+          <p class="muted small">Better facilities mean more prospects at every youth intake, higher starting ratings and potential, faster development, and more accurate potential estimates. Prospects train and improve every time your first team plays.</p>
+          ${a.level < 5 ? `<button class="btn primary" data-act="academy-upgrade" ${S.clubs[c.clubId].budget < upCost ? 'disabled' : ''}>Upgrade to level ${a.level + 1} · ${money(upCost)}</button>` : '<p class="small">Your academy is world class.</p>'}
+        </section>
+        <section class="card">
+          <h3>Scouting</h3>
+          <p class="muted small">Send scouts to find prospects (${money(scoutCost)} per mission, 3 missions per season). Each mission finds 1–2 players${a.level >= 4 ? ' (plus one extra with your top facilities)' : ''}.</p>
+          <div class="scout-grid">${Object.entries(ACADEMY_REGIONS).map(([k, r]) => `<button class="scout-card" data-act="scout" data-id="${k}" ${a.scouted >= 3 || S.clubs[c.clubId].budget < scoutCost ? 'disabled' : ''}><strong>${esc(r.label)}</strong><span class="muted small">${esc(r.desc)}</span></button>`).join('')}</div>
+        </section>
+      </div>
+      <section class="card">
+        <h3>Prospects <span class="muted small">Promote players to your first team before they turn 19, or they leave the academy.</span></h3>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pos</th><th class="left">Name</th><th>Nat</th><th>Age</th><th>OVR</th><th>POT (est.)</th><th>Progress</th><th></th></tr></thead><tbody>
+          ${youth.map((p) => `<tr class="${p.age >= 18 ? 'warn-row' : ''}"><td>${posBadge(p.pos)}</td><td class="left">${playerLink(p)} ${p.pot >= 86 ? '<span class="tag good">Wonderkid</span>' : ''}</td><td>${natTag(p.nat)}</td><td>${p.age}${p.age >= 18 ? ' <span class="tag warn">last season</span>' : ''}</td><td>${ovrBadge(p.ovr)}${delta(p)}</td><td>${potR(p)}</td>
+            <td><div class="xpbar small-bar"><i style="width:${clamp((p.xp || 0) / 8, 0, 1) * 100}%"></i></div></td>
+            <td class="nowrap"><button class="btn xs primary" data-act="youth-promote" data-id="${p.id}">Promote</button> <button class="btn xs ghost" data-act="youth-release" data-id="${p.id}">Release</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted">No prospects. Send your scouts out or wait for the next youth intake.</td></tr>'}
+        </tbody></table></div>
+      </section>`;
   }
 
   /* ------------------------------------------------------------------ *
@@ -3484,17 +3953,18 @@
     'start-mode': (id) => { ui.startMode = id; ui.managerName = $('#mgr-name')?.value || ui.managerName; renderStart(); },
     'start-career': () => {
       if (!ui.startClub) return;
-      const saved = loadCareer();
+      const saved = loadMeta();
       const pm = ui.startMode === 'player';
       const name = ($('#mgr-name')?.value || '').trim() || (pm ? 'Alex Hunter' : 'The Gaffer');
       const pos = $('#start-pos')?.value || 'ST';
       const role = $('#start-role')?.value || defaultRole(pos);
-      const begin = () => { startCareer(ui.startClub, name, { mode: pm ? 'player' : 'manager', pos, role }); view = 'home'; render(); };
-      if (saved && saved.career) askConfirm('Starting a new career will overwrite your saved career.', begin, 'Start new career');
+      const nat = $('#start-nat')?.value || 'ENG';
+      const begin = () => { startCareer(ui.startClub, name, { mode: pm ? 'player' : 'manager', pos, role, nat }); view = 'home'; render(); };
+      if (saved) askConfirm('Starting a new career will overwrite your saved career.', begin, 'Start new career');
       else begin();
     },
-    continue: () => { const s = loadCareer(); if (!s) return; S = s; for (const p of Object.values(S.players)) ensureFields(p); invalidate(); view = 'home'; render(); },
-    'delete-save': () => askConfirm('Delete your saved career?', () => { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ } renderStart(); }, 'Delete'),
+    continue: async () => { const s = await loadCareer(); if (!s || !s.career) return toast('Could not load the saved career.', 'bad'); S = s; upgradeState(S); invalidate(); view = 'home'; render(); },
+    'delete-save': () => askConfirm('Delete your saved career?', () => { try { localStorage.removeItem(SAVE_KEY); localStorage.removeItem(META_KEY); } catch (e) { /* ignore */ } renderStart(); }, 'Delete'),
     'open-import': () => { openModal(`<h2>Import FC 26 ratings</h2>${importPanelHtml(false)}`, true); },
     'do-import': () => {
       const inCareer = !!(S && S.career);
@@ -3549,6 +4019,26 @@
     'accept-offer': (id) => { const c = C(); const o = c.offers.find((x) => x.id === id); if (!o) return; if (S.clubs[o.clubId].budget < o.amount) { c.offers = c.offers.filter((x) => x !== o); toast('The buyer can no longer afford the deal.', 'bad'); return render(); } sellPlayer(o.pid, o.clubId, o.amount); render(); },
     'reject-offer': (id) => { const c = C(); c.offers = c.offers.filter((x) => x.id !== id); save(); render(); },
     renew: (id) => renewModal(id),
+    'intl-sel': (id) => { ui.intlSel = id; render(); },
+    'academy-upgrade': () => {
+      const c = C(), a = academy(), cost = niceRound(ACADEMY_COST[a.level] * leagueFactor());
+      if (a.level >= 5) return;
+      if (S.clubs[c.clubId].budget < cost) return toast('Not enough budget.', 'bad');
+      askConfirm(`Upgrade the academy to level ${a.level + 1} for ${money(cost)}?`, () => { S.clubs[c.clubId].budget -= cost; a.level++; news(`🎓 Academy facilities upgraded to level ${a.level}.`, 'good'); save(); render(); }, 'Upgrade');
+    },
+    scout: (id) => {
+      const c = C(), a = academy(), cost = niceRound(0.4e6 * leagueFactor());
+      if (a.scouted >= 3) return toast('You have used all scouting missions this season.', 'bad');
+      if (S.clubs[c.clubId].budget < cost) return toast('Not enough budget.', 'bad');
+      S.clubs[c.clubId].budget -= cost; a.scouted++;
+      const n = randInt(1, 2) + (a.level >= 4 ? 1 : 0);
+      const found = Array.from({ length: n }, () => genProspect(id));
+      news(`🔎 Scouts in ${ACADEMY_REGIONS[id].label} found ${found.map((p) => `${p.name} (${p.pos}, ${p.age})`).join(', ')}.`, 'good');
+      save(); render();
+      toast(`${n} new prospect${n > 1 ? 's' : ''} joined the academy.`, 'good');
+    },
+    'youth-promote': (id) => { promoteYouth(id); render(); },
+    'youth-release': (id) => askConfirm(`Release ${S.players[id].name} from the academy?`, () => { S.clubs.YTH.pids = S.clubs.YTH.pids.filter((x) => x !== id); delete S.players[id]; save(); render(); }, 'Release'),
     'ren-wage': (id) => { const { wage, years } = wageOfferFromForm(); const t = renewTalk(id); const r = wageTalk(S.players[id], t, wage, years, 'renew'); Object.assign(t.w, { msg: r.msg, status: r.status, lastOffer: wage, lastYears: years }); renewModal(id); },
     'ren-wage-accept': (id) => { const t = renewTalk(id); t.w.agreed = { wage: t.w.counter, years: t.w.counterYears || 3 }; t.w.msg = 'Terms agreed.'; t.w.status = 'accepted'; renewModal(id); },
     'ren-complete': (id) => { if (completeRenewal(id)) { closeModal(); render(); } },
@@ -3611,7 +4101,7 @@
     },
     'export-save': () => download(`soccer-manager-${seasonLabel(C().season).replace('/', '-')}.json`, serialize(S), 'application/json'),
     'to-menu': () => { save(); S = W; ui.startLeague = null; ui.startClub = null; renderStart(); },
-    abandon: () => askConfirm('Abandon this career? Your save will be deleted.', () => { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ } S = W; renderStart(); }, 'Abandon'),
+    abandon: () => askConfirm('Abandon this career? Your save will be deleted.', () => { try { localStorage.removeItem(SAVE_KEY); localStorage.removeItem(META_KEY); } catch (e) { /* ignore */ } S = W; renderStart(); }, 'Abandon'),
     close: () => closeModal(),
     'confirm-yes': () => { const f = pendingConfirm; pendingConfirm = null; closeModal(); if (f) f(); },
     'export-copy': () => exportCopy(),
@@ -3632,6 +4122,7 @@
     role: (v, el) => { const c = C(); c.roles = c.roles || []; c.roles[+el.dataset.slot] = v; save(); render(); },
     'my-role': (v) => { me().role = v; save(); render(); toast(`You now play as a ${ROLE[v].label.toLowerCase()}.`, 'good'); },
     'start-role': (v) => { ui.startRole = v; },
+    'start-nat': (v) => { ui.startNat = v; },
     'start-pos': (v) => { ui.startPos = v; ui.startRole = null; ui.managerName = $('#mgr-name')?.value || ui.managerName; renderStart(); },
     speed: (v) => { C().speed = v; save(); if (!ui.playback) render(); else if (v === 'instant') finishPlayback(); },
     'fix-filter': (v) => { ui.fixFilter = v; ui.fixDay = null; render(); },
@@ -3683,7 +4174,7 @@
         try {
           const data = JSON.parse(r.result);
           if (!data.career || !data.players || !data.career.days) throw new Error('not a save file');
-          S = data; for (const p of Object.values(S.players)) ensureFields(p); invalidate(); save(); view = 'home'; render(); toast('Save loaded.', 'good');
+          S = data; upgradeState(S); invalidate(); save(); view = 'home'; render(); toast('Save loaded.', 'good');
         } catch (err) { toast('That file is not a valid save from this version.', 'bad'); }
       };
       r.readAsText(el.files[0]);
@@ -3696,7 +4187,18 @@
   /* ------------------------------------------------------------------ *
    * Boot
    * ------------------------------------------------------------------ */
+  // Brings saves and databases from older versions up to date.
+  function upgradeState(st) {
+    for (const p of Object.values(st.players)) ensureFields(p);
+    const prev = S; S = st;
+    ensureNations(st);
+    if (!st.clubs.YTH) st.clubs.YTH = { id: 'YTH', name: 'Youth academy', short: 'YTH', leagueId: null, pids: [], level: 50, budget: 0, youth: true };
+    if (st.career && st.career.mode !== 'player' && !st.career.academy) academySetup();
+    S = prev === st ? st : prev;
+    if (st.career) S = st;
+  }
   W = loadWorld() || buildWorld();
+  if (!W.nations) { S = W; upgradeState(W); }
   for (const p of Object.values(W.players)) ensureFields(p);
   S = W;
   renderStart();

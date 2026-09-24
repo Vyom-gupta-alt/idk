@@ -467,3 +467,17 @@ label.check { display: inline-flex; align-items: center; gap: .4rem; font-size: 
 .nowrap { white-space: nowrap; }
 .terms { border-top: 1px solid var(--line); margin-top: .8rem; padding-top: .4rem; }
 .p-offer .notice { margin: .4rem 0 0; }
+
+/* ---- International football & youth academy (v5) ---- */
+.tag.intl { color: #c4b5fd; border-color: #5b21b6; }
+.nat { display: inline-block; font-size: .64rem; font-weight: 800; letter-spacing: .04em; padding: 0 .3rem; border-radius: 4px; background: var(--card2); border: 1px solid var(--line); color: var(--muted); vertical-align: middle; }
+.ct-intl, .ct-tourn { background: #3b1d6e; color: #ddd6fe; }
+.tourn-cards, .scout-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: .6rem; }
+.tourn-card, .scout-card { background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: .7rem .8rem; cursor: pointer; text-align: left; display: flex; flex-direction: column; gap: .2rem; }
+.tourn-card:hover, .scout-card:hover:not(:disabled) { border-color: var(--accent); }
+.tourn-card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.scout-card:disabled { opacity: .5; cursor: not-allowed; }
+.groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: .6rem .9rem; margin-bottom: .6rem; }
+.grp h4 { margin: .4rem 0 .2rem; }
+.warn-row td { background: rgba(249,115,22,.07); }
+.small-bar { width: 70px; margin: 0 auto; }

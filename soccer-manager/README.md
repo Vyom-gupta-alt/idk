@@ -24,7 +24,7 @@ Every match you watch shows a pitch with 22 dots and the ball, driven minute by 
 - **Cups & Europe:** each country has its domestic cup (FA Cup, Copa del Rey, Coppa Italia, DFB-Pokal, Coupe de France, Taça de Portugal, KNVB Cup) for both divisions as a single-leg knockout with extra time and penalties. There is also a **Champions League** (36 clubs), **Europa League** (24) and **Conference League** (16), with a Swiss-style league phase, two-legged knockout ties and a one-match final. European places come from league position plus the cup winner. Season 1 uses the real 2024/25 tables.
 - **One real calendar:** league games on Saturdays, cup and European games midweek, and international breaks. Browse any date, or simulate up to a date or to the end of the season.
 - **Locked lineup:** your XI never changes unless you change it. Injured or suspended players get a temporary stand-in and return to the team automatically once available.
-- **Dynamic OVR:** after every match, players gain or lose progress based on their match rating. Young players grow fastest, up to a hidden potential (shown as a range), and it gets harder to improve the higher a player's OVR already is. Veterans slowly decline. There is also a summer age effect, plus retirements and academy graduates.
+- **Dynamic OVR:** after every match, players gain or lose progress based on their match rating. Young players grow fastest, up to a hidden potential (shown as a range), and it gets harder to improve the higher a player's OVR already is. Veterans slowly decline. There is also a summer age effect, plus retirements.
 - **Realistic transfers:**
   - Summer (until 1 Sep) and January windows. Free agents can be signed any time.
   - Clubs value their key players, young talents and players sold to league rivals higher, and some stars are untouchable.
@@ -36,6 +36,15 @@ Every match you watch shows a pitch with 22 dots and the ball, driven minute by 
 - **Player roles** for every position, e.g. Holding midfielder, Deep-lying playmaker, Box-to-box, Mezzala, Inside forward, Cross specialist, Target man, Poacher, False 9 and Wing-back. Roles change who shoots, who creates, who heads crosses in, and how much each player adds to attack, midfield or defence. Goal commentary changes with the role too.
 - **Player type (player career):** choose how you play (for example a winger who cuts in, or a cross specialist), and change it later in My Career.
 - **Contracts & wage negotiation (both modes):** every player has a contract end date. Manager: agree the fee, then personal terms (wage and contract length) with counter-offers, and renew expiring contracts or the player leaves on a free. Player career: ask clubs for a higher wage (they have a hidden limit and may withdraw), and negotiate a new contract with your own club.
+- **Youth academy (manager):** upgrade your facilities (levels 1–5) for better intakes, pick a scouting region (local, Europe, South America, Africa or Asia), and watch your prospects develop every matchday. Promote the best prospects to the first team or release them. A new intake arrives each summer, and prospects aged 18 or older must be promoted or they leave.
+- **International football (both modes):** 84 national teams with real players who are called up from their clubs.
+  - International breaks in September, October, November and March, with friendlies and qualifiers.
+  - Tournaments: AFCON (mid-season, so African players miss club games), Asian Cup, the 2026 World Cup (48 teams, hosted by USA/Mexico/Canada), Euros and Copa América (2028), and the Nations League Finals, each with groups and knockouts.
+  - A world ranking based on Elo.
+  - An International tab shows fixtures, groups, brackets and winners.
+  - Players away on duty are marked INTL and miss club matches.
+  - In player career, choose your nationality and earn caps.
+- **Compressed saves:** saves are gzip-compressed so large worlds fit in browser storage.
 - **FC 26 ratings import** (CSV/JSON): `Name`/`short_name`/`long_name`, `Club`/`club_name`, `Position`/`player_positions`, `OVR`/`overall`, `Age`, `League`.
 - **Match engine:** a minute-by-minute simulation with live text commentary, stats, player ratings, extra time and penalty shootouts. 9 formations and 4 mentalities.
 - Stats per competition, a trophy cabinet, season history and auto-save.
