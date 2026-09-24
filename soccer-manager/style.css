@@ -620,3 +620,12 @@ body.m3d-open { overflow: hidden; }
 #m3d.gala .gr-sub { color: #fff; font-weight: 700; text-shadow: 0 2px 10px #000; animation: fadeIn .6s 1.6s both; }
 #m3d.gala .cel-btns { transition-delay: .4s; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* v14: events, retirement */
+.event-card { text-align: center; }
+.event-card .ev-kicker { letter-spacing: .2em; text-transform: uppercase; font-size: .72rem; color: var(--muted); }
+.event-card .ev-icon { font-size: 3rem; margin: .3rem 0; }
+.event-card h2 { margin: .2rem 0 .6rem; }
+.event-card .ev-choices { display: flex; flex-direction: column; gap: .5rem; margin-top: 1rem; }
+.retire-card { background: radial-gradient(ellipse at 80% 0%, rgba(99,102,241,.18), transparent 60%), var(--card); }
+.retire-card .gh-kicker { letter-spacing: .25em; text-transform: uppercase; font-size: .75rem; color: #c7d2fe; font-weight: 700; }

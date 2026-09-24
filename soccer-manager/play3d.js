@@ -1217,7 +1217,7 @@
       r.shadowMap.enabled = true; r.shadowMap.type = T.PCFSoftShadowMap;
       root.querySelector('.m3d-stage').appendChild(r.domElement);
       const scene = (this.scene = new T.Scene());
-      const award = cfg.kind === 'ballon' || cfg.kind === 'boot';
+      const award = cfg.kind === 'ballon' || cfg.kind === 'boot' || cfg.kind === 'farewell';
       scene.background = new T.Color(award ? 0x04040a : 0x050b16);
       scene.fog = new T.Fog(scene.background, 30, 90);
       this.cam = new T.PerspectiveCamera(45, 1, 0.1, 300);
@@ -1303,7 +1303,7 @@
     loop(now) {
       this.raf = requestAnimationFrame(this.loop);
       const dt = Math.min(0.05, (now - this.last) / 1000); this.last = now; this.t += dt;
-      const t = this.t, award = this.cfg.kind === 'ballon' || this.cfg.kind === 'boot';
+      const t = this.t, award = this.cfg.kind === 'ballon' || this.cfg.kind === 'boot' || this.cfg.kind === 'farewell';
       // Players: jump and cheer; the captain / winner lifts the trophy.
       const lift = clamp((t - 2.2) / 1.2, 0, 1);
       for (const pp of this.people) {
@@ -1361,6 +1361,7 @@
     const gold = new T.MeshStandardMaterial({ color: 0xffd34d, metalness: 0.45, roughness: 0.25, emissive: 0x8a5a00, emissiveIntensity: 0.55 });
     const silver = new T.MeshStandardMaterial({ color: 0xf1f5f9, metalness: 0.4, roughness: 0.2, emissive: 0x6b7280, emissiveIntensity: 0.45 });
     const add = (geo, m, y = 0, x = 0, z = 0) => { const o = new T.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
+    if (kind === 'farewell') return g; // just the wave goodbye
     if (kind === 'ballon') {
       add(new T.CylinderGeometry(0.12, 0.16, 0.18, 24), gold, 0.09);
       add(new T.SphereGeometry(0.2, 32, 24), gold, 0.38);

@@ -368,7 +368,7 @@
     return Math.max(10000, niceRound(v));
   }
   const avgRating = (p) => (p.st.apps ? p.st.rsum / p.st.apps : 0);
-  const available = (p) => p && p.inj <= 0 && p.sus <= 0 && !p.away;
+  const available = (p) => p && p.inj <= 0 && p.sus <= 0 && !p.away && !(p.leave > 0);
   // Fit for a player: learned positions count as natural; positions in training are partly learned.
   function pfit(p, slot) {
     if (p.pos === slot) return 0;
@@ -1644,7 +1644,7 @@
   // Plays every match on the current calendar day. Returns the user's result, if they played.
   function playDay(withText) {
     const c = C();
-    if (c.seasonOver) return null;
+    if (c.seasonOver || c.retired) return null;
     const day = c.days[c.dayIdx];
     const pend = { inj: [], sus: [] };
     const playedClubs = new Set();
@@ -1664,7 +1664,7 @@
     }
     // Injuries/suspensions count down per match the club plays.
     for (const cid of playedClubs) {
-      for (const pid of S.clubs[cid].pids) { const p = S.players[pid]; if (p.inj > 0) p.inj--; if (p.sus > 0) p.sus--; }
+      for (const pid of S.clubs[cid].pids) { const p = S.players[pid]; if (p.inj > 0) p.inj--; if (p.sus > 0) p.sus--; if (p.leave > 0) p.leave--; if (p.homesick > 0) { p.homesick--; p.form = clamp((p.form || 0) - 0.25, -2, 2); } }
     }
     const mine = (pid) => S.players[pid]?.clubId === c.clubId;
     for (const [pid, n] of pend.inj) {
@@ -1679,6 +1679,7 @@
     }
     if (!isPlayerMode() && playedClubs.has(c.clubId)) academyTraining();
     if (playedClubs.has(c.clubId)) teamTraining();
+    if (playedClubs.has(c.clubId) && rand() < 0.085) maybeEvent();
     if (windowInfo().open) { aiTransfers(randInt(1, 3)); maybeIncomingOffer(); }
     c.offers = c.offers.filter((o) => o.until > c.dayIdx && (isPlayerMode() || S.players[o.pid]?.clubId === c.clubId));
     c.dayIdx++;
@@ -2026,6 +2027,237 @@
       </tbody></table></div></section>` : ''}`;
   }
 
+
+  /* --- Unexpected events: decision cards with consequences (both modes) --- */
+  const squadOf = (fn) => { const c = C(); return shuffle(S.clubs[c.clubId].pids.map((id) => S.players[id]).filter((p) => p && p.id !== c.pid && available(p) && (!fn || fn(p)))); };
+  const formAdd = (p, d) => { if (p) p.form = clamp((p.form || 0) + d, -2, 2); };
+  const leagueNat = () => POOL_NAT[S.leagues[C().leagueId]?.pool] || null;
+  const fee = (x) => niceRound(x * leagueFactor());
+  const EVENTS = {
+    // ---- Manager mode ----
+    clash: { mode: 'manager', w: 10,
+      when: () => { const l = squadOf((p) => p.pos !== 'GK'); return l.length > 3 ? { a: l[0].id, b: l[1].id, hurt: rand() < 0.5 ? 0 : 1, n: randInt(1, 4) } : null; },
+      card: (d) => { const A = S.players[d.a], B = S.players[d.b], H = d.hurt ? B : A; return { icon: '🤕', title: 'Clash on the training ground', text: `${A.name} and ${B.name} went flying into a 50-50 in training. ${H.name} limped off and will miss ${d.n} match${d.n > 1 ? 'es' : ''}. The two are still arguing.`, choices: ['Fine them both', 'Sit them down and clear the air', 'Let it go: it shows passion'] }; },
+      apply: (d) => { S.players[d.hurt ? d.b : d.a].inj = d.n; },
+      resolve: (d, i) => { const A = S.players[d.a], B = S.players[d.b];
+        if (i === 0) { formAdd(A, -0.4); formAdd(B, -0.4); S.clubs[C().clubId].budget += 40e3; return 'Both players were fined a week\'s wages. They are not happy.'; }
+        if (i === 1) { formAdd(A, 0.4); formAdd(B, 0.4); return 'They shook hands. The squad appreciates how you handled it.'; }
+        if (rand() < 0.4) { formAdd(A, -0.6); formAdd(B, -0.6); return 'The feud rumbles on and it is affecting their form.'; } return 'It blew over. Training is back to normal.'; } },
+    bustup: { mode: 'manager', w: 7,
+      when: () => { const l = squadOf((p) => p.age >= 22); return l.length > 4 ? { a: l[0].id, b: l[1].id } : null; },
+      card: (d) => ({ icon: '💢', title: 'Dressing-room bust-up', text: `${S.players[d.a].name} and ${S.players[d.b].name} had a heated row in the dressing room after the match. The rest of the squad is watching how you react.`, choices: [`Back ${S.players[d.a].name.split(' ').pop()}`, `Back ${S.players[d.b].name.split(' ').pop()}`, 'Fine both players'] }),
+      resolve: (d, i) => { const A = S.players[d.a], B = S.players[d.b];
+        if (i === 0) { formAdd(A, 0.6); formAdd(B, -1); return `${A.name} feels backed. ${B.name} is sulking.`; }
+        if (i === 1) { formAdd(B, 0.6); formAdd(A, -1); return `${B.name} feels backed. ${A.name} is sulking.`; }
+        formAdd(A, -0.3); formAdd(B, -0.3); S.clubs[C().clubId].budget += 60e3; return 'Both were fined. Discipline restored, but nobody is smiling.'; } },
+    homesick: { mode: 'manager', w: 8,
+      when: () => { const n = leagueNat(); const l = squadOf((p) => p.age <= 25 && p.nat && p.nat !== n && !p.homesick); return l.length ? { a: l[0].id } : null; },
+      card: (d) => { const A = S.players[d.a]; return { icon: '🏠', title: 'Homesick', text: `${A.name} (${A.age}) is struggling to settle and misses home${NATIONS[A.nat] ? ` in ${NATIONS[A.nat].name}` : ''}. His form is dropping.`, choices: ['Give him a week off to visit family', 'Loan him to a club back home', 'Tell him to toughen up'] }; },
+      resolve: (d, i) => { const A = S.players[d.a];
+        if (i === 0) { A.leave = 2; formAdd(A, 1); return `${A.name} flies home for a week (misses 2 matches) and should come back refreshed.`; }
+        if (i === 1) {
+          const home = Object.values(S.clubs).filter((cl) => isClub(cl) && cl.id !== C().clubId && cl.pids.length < 30 && POOL_NAT[S.leagues[cl.leagueId]?.pool] === A.nat);
+          const to = pick(home.length ? home : Object.values(S.clubs).filter((cl) => isClub(cl) && cl.id !== C().clubId && Math.abs(clubRating(cl.id) - A.ovr) < 6));
+          if (to && !canSell(A)) { movePlayer(A, to.id); A.loan = { from: C().clubId, pct: 30, season: C().season, ovr: A.ovr, buy: 0 }; (C().loans = C().loans || []).push(A.id); cleanLineup(); return `${A.name} joins ${to.name} on loan until the summer, closer to home.`; }
+          A.homesick = 4; return 'No club could take him, so he stays for now.'; }
+        A.homesick = 6; formAdd(A, -0.8); return `${A.name} is unhappy. Expect his form to suffer for a while.`; } },
+    flu: { mode: 'both', w: 6,
+      when: () => { const l = squadOf(); return l.length > 6 ? { ids: l.slice(0, randInt(2, 4)).map((p) => p.id) } : null; },
+      card: (d) => ({ icon: '🤒', title: 'Illness in the squad', text: `A stomach bug is going round the training ground. ${d.ids.map((id) => S.players[id].name).join(', ')} ${d.ids.length > 1 ? 'are' : 'is'} unwell.`, choices: ['Rest them for the next match', 'Play through it'] }),
+      resolve: (d, i) => { for (const id of d.ids) { const p = S.players[id]; if (!p) continue; if (i === 0) p.leave = 1; else formAdd(p, -1.1); } return i === 0 ? 'They will sit out the next match to recover.' : 'They will play, but expect them to be off the pace.'; } },
+    demand: { mode: 'manager', w: 7,
+      when: () => { const l = squadOf((p) => p.ovr >= clubRating(C().clubId) && p.age >= 21).sort((a, b) => b.ovr - a.ovr); return l.length ? { a: l[0].id } : null; },
+      card: (d) => { const A = S.players[d.a]; return { icon: '✍️', title: 'Contract demand', text: `${A.name}'s agent says his client is one of the best players at the club and wants a pay rise from ${money(A.wage)} a week.`, choices: [`Give him 25% more (${money(niceWage(A.wage * 1.25))}/wk)`, 'Promise talks in the summer', 'Refuse'] }; },
+      resolve: (d, i) => { const A = S.players[d.a];
+        if (i === 0) { A.wage = niceWage(A.wage * 1.25); A.contract = Math.max(A.contract, C().season + 3); formAdd(A, 1); return `${A.name} signs an improved deal and is delighted.`; }
+        if (i === 1) { formAdd(A, -0.2); return 'The agent reluctantly accepts. For now.'; }
+        formAdd(A, -1.2); return rand() < 0.5 ? `${A.name} is furious and has told the media he wants to leave.` : `${A.name} is unhappy but will keep playing.`; } },
+    sponsor: { mode: 'manager', w: 6,
+      when: () => ({ v: fee(randInt(2, 12) * 1e6) }),
+      card: (d) => ({ icon: '💼', title: 'Sponsorship offer', text: `A tech company wants its logo on your training kit and offers ${money(d.v)}. The fans have mixed feelings about the brand.`, choices: ['Accept the deal', 'Decline'] }),
+      resolve: (d, i) => { if (i === 0) { S.clubs[C().clubId].budget += d.v; return `${money(d.v)} has been added to your transfer budget.`; } return 'You turned it down. The fans appreciate it.'; } },
+    takeover: { mode: 'both', w: 1.2,
+      when: () => ({ v: fee(randInt(40, 160) * 1e6) }),
+      card: (d) => ({ icon: '🏦', title: 'Club takeover!', text: `A wealthy consortium has completed a takeover of ${clubName(C().clubId)} and promises big investment${isPlayerMode() ? ' in the squad' : `: ${money(d.v)} for new signings`}.`, choices: ['Great news!'] }),
+      resolve: (d) => { S.clubs[C().clubId].budget += d.v; if (!isPlayerMode()) C().wageBudget = niceRound(C().wageBudget * 1.2); return isPlayerMode() ? 'The club will be busy in the transfer market.' : `Your budget grows by ${money(d.v)} and the wage budget rises by 20%.`; } },
+    protest: { mode: 'manager', w: 6,
+      when: () => { const f = userFixtures().filter((x) => x.m && x.m.played).slice(-5); const uid = C().clubId; const lost = f.filter((x) => (x.m.h === uid ? x.m.hg < x.m.ag : x.m.ag < x.m.hg)).length; return lost >= 3 ? {} : null; },
+      card: () => ({ icon: '📢', title: 'Fan protest', text: 'After a poor run, fans have gathered outside the stadium with banners. The media want a response.', choices: ['Meet the supporters', 'Promise the board will back you in January', 'Ignore it'] }),
+      resolve: (d, i) => { const l = squadOf(); if (i === 0) { l.forEach((p) => formAdd(p, 0.25)); return 'The fans respect you for fronting up. The mood lifts a little.'; } if (i === 1) { S.clubs[C().clubId].budget += fee(5e6); return 'The board releases a little extra money for January.'; } l.forEach((p) => formAdd(p, -0.2)); return 'The atmosphere at the next home game will be tense.'; } },
+    trialist: { mode: 'manager', w: 5,
+      when: () => (S.clubs.YTH ? {} : null),
+      card: () => ({ icon: '🌟', title: 'Trialist impresses', text: 'A 16-year-old on trial has been the talk of the training ground. The academy staff think he could be special.', choices: ['Sign him to the academy', 'Let him go'] }),
+      resolve: (d, i) => { if (i) return 'He signs for a rival academy instead.'; const p = genProspect('local'); if (p) { p.pot = clamp(p.pot + randInt(4, 9), p.ovr + 10, 93); return `${p.name} joins your academy (potential ${p.pot}).`; } return 'He joins the academy.'; } },
+    party: { mode: 'manager', w: 6,
+      when: () => { const l = squadOf((p) => p.age <= 28); return l.length ? { a: l[0].id } : null; },
+      card: (d) => ({ icon: '🎉', title: 'Caught partying', text: `Photos of ${S.players[d.a].name} at a nightclub at 3am, two days before the match, are all over social media.`, choices: ['Fine him', 'Drop him for the next match', 'Ignore it'] }),
+      resolve: (d, i) => { const A = S.players[d.a]; if (i === 0) { formAdd(A, -0.4); S.clubs[C().clubId].budget += 30e3; return `${A.name} is fined and apologises publicly.`; } if (i === 1) { A.sus = Math.max(A.sus, 1); return `${A.name} is left out of the next squad.`; } formAdd(A, -1); return 'It happens again a week later. His form is suffering.'; } },
+    press: { mode: 'manager', w: 6,
+      when: () => ({ pos: leagueTable(C().leagueId).findIndex((r) => r.id === C().clubId) + 1 }),
+      card: (d) => ({ icon: '🎤', title: 'Press conference', text: `A journalist asks: "You are ${ordinal(d.pos)} in the table. Can you win the league?"`, choices: ['"We will win the league."', '"We take it one game at a time."', '"Ask the referees, they decide our games."'] }),
+      resolve: (d, i) => { const l = squadOf(); if (i === 0) { const ok = d.pos <= 3; l.forEach((p) => formAdd(p, ok ? 0.35 : -0.3)); return ok ? 'The players are fired up by your belief.' : 'The pressure is getting to the players.'; } if (i === 1) return 'A calm answer. Nothing changes.'; S.clubs[C().clubId].budget -= fee(80e3); return `The FA fines you ${money(fee(80e3))} for your comments.`; } },
+    veteran: { mode: 'manager', w: 4,
+      when: () => { const l = squadOf((p) => p.age >= 33 && !p.retire); return l.length ? { a: l[0].id } : null; },
+      card: (d) => ({ icon: '👴', title: 'Thinking about retirement', text: `${S.players[d.a].name} (${S.players[d.a].age}) tells you he is thinking about retiring at the end of the season.`, choices: ['Persuade him to play one more year', 'Respect his decision'] }),
+      resolve: (d, i) => { const A = S.players[d.a]; if (i === 0) { if (rand() < 0.6) { A.contract = Math.max(A.contract, C().season + 1); formAdd(A, 0.5); return `${A.name} agrees to one more season.`; } A.retire = 1; return `${A.name} has made up his mind: he will retire in the summer.`; } A.retire = 1; formAdd(A, 0.4); return `${A.name} will retire at the end of the season. He wants to go out on a high.`; } },
+    rush: { mode: 'manager', w: 5,
+      when: () => { const l = S.clubs[C().clubId].pids.map((id) => S.players[id]).filter((p) => p.inj >= 3 && p.ovr >= clubRating(C().clubId) - 2); return l.length ? { a: l[0].id } : null; },
+      card: (d) => ({ icon: '💉', title: 'Rush him back?', text: `The physios say ${S.players[d.a].name} could play sooner with painkilling injections, but there is a risk of making the injury worse.`, choices: ['Rush him back', 'Let him heal properly'] }),
+      resolve: (d, i) => { const A = S.players[d.a]; if (i === 1) return 'He will return when he is fully fit.'; if (rand() < 0.3) { A.inj += randInt(3, 6); return `Disaster: the injury got worse. ${A.name} is out for ${A.inj} matches.`; } A.inj = Math.max(0, Math.ceil(A.inj / 3)); return `${A.name} is back much sooner than expected.`; } },
+    // ---- Player career ----
+    p_clash: { mode: 'player', w: 9,
+      when: () => { const l = squadOf((p) => p.pos !== 'GK'); return l.length ? { a: l[0].id, you: rand() < 0.45, n: randInt(1, 3) } : null; },
+      card: (d) => ({ icon: '🤕', title: 'Clash in training', text: `You and ${S.players[d.a].name} crashed into each other in training. ${d.you ? `You are hurt and will miss ${d.n} match${d.n > 1 ? 'es' : ''}.` : `${S.players[d.a].name} is hurt.`} Words were exchanged.`, choices: ['Apologise', 'Stand your ground'] }),
+      apply: (d) => { if (d.you) me().inj = d.n; else S.players[d.a].inj = d.n; },
+      resolve: (d, i) => { if (i === 0) { formAdd(me(), 0.3); return 'You cleared the air. The dressing room respects it.'; } formAdd(me(), rand() < 0.5 ? 0.4 : -0.6); return 'The coaches noticed. It could go either way with the manager.'; } },
+    p_homesick: { mode: 'player', w: 7,
+      when: () => (me().nat && me().nat !== leagueNat() ? {} : null),
+      card: () => ({ icon: '🏠', title: 'Homesick', text: `Life abroad is hard. You miss your family and friends${NATIONS[me().nat] ? ` in ${NATIONS[me().nat].name}` : ''}.`, choices: ['Fly your family over', 'Ask your agent about a move home', 'Push through it'] }),
+      resolve: (d, i) => { const P = me(); if (i === 0) { formAdd(P, 0.8); return 'Having your family around helps a lot.'; }
+        if (i === 1) { const home = Object.values(S.clubs).filter((cl) => isClub(cl) && cl.id !== C().clubId && POOL_NAT[S.leagues[cl.leagueId]?.pool] === P.nat && clubRating(cl.id) >= P.ovr - 8); if (!home.length) return 'Your agent could not find a club back home.'; const cl = pick(home); C().offers.push({ id: 'o' + C().dayIdx + '-home', clubId: cl.id, amount: niceRound(playerValue(P) * 0.9), wage: niceWage(P.wage * 1.05), years: 3, until: C().dayIdx + 30, role: roleAt(cl.id, P) }); return `${cl.name} are interested. See the offer in My Career (it can be accepted when a window is open).`; }
+        P.homesick = 4; return 'You will try to push through, but your form may suffer.'; } },
+    p_endorse: { mode: 'player', w: 6,
+      when: () => ({ v: niceWage(Math.max(2000, playerValue(me()) / 3000)) }),
+      card: (d) => ({ icon: '👟', title: 'Endorsement deal', text: `A boot brand wants you as an ambassador: ${money(d.v)} a week, plus a signature colourway.`, choices: ['Sign the deal', 'Hold out for a bigger brand'] }),
+      resolve: (d, i) => { const P = me(); if (i === 0) { P.endorse = (P.endorse || 0) + d.v; return `You are now earning ${money(P.endorse)} a week from endorsements.`; } if (rand() < 0.35) { P.endorse = (P.endorse || 0) + d.v * 2; return `A bigger brand came in: ${money(d.v * 2)} a week!`; } return 'No other brand came in. The offer has gone.'; } },
+    p_party: { mode: 'player', w: 6,
+      when: () => ({}),
+      card: () => ({ icon: '🎉', title: 'Party invite', text: 'Some teammates are going out the night before a big match and want you to come.', choices: ['Go out', 'Stay home and rest'] }),
+      resolve: (d, i) => { if (i === 1) { formAdd(me(), 0.3); return 'An early night. You feel sharp.'; } if (rand() < 0.4) { me().sus = Math.max(me().sus, 1); formAdd(me(), -0.6); return 'The manager found out. You are dropped for the next match.'; } formAdd(me(), -0.3); return 'A great night, but a heavy head in training.'; } },
+    p_media: { mode: 'player', w: 6,
+      when: () => ({}),
+      card: () => ({ icon: '🎤', title: 'Interview', text: 'A TV reporter asks whether you are happy with your playing time.', choices: ['Praise the manager and the team', 'Say you deserve more minutes', 'Hint that other clubs are interested'] }),
+      resolve: (d, i) => { if (i === 0) { formAdd(me(), 0.2); return 'Good answer. The manager liked it.'; } if (i === 1) { if (rand() < 0.5) { formAdd(me(), 0.6); return 'The manager has noticed your hunger.'; } formAdd(me(), -0.6); return 'The manager did not appreciate going public.'; } const o = playerOffers(1)[0]; if (o) { C().offers.push(o); return `It worked: ${clubName(o.clubId)} have made an offer.`; } return 'Nobody bit.'; } },
+    p_knock: { mode: 'player', w: 6,
+      when: () => ({}),
+      card: () => ({ icon: '🦵', title: 'A knock in training', text: 'You felt something in your hamstring during sprints.', choices: ['Play through the pain', 'Tell the physio and rest'] }),
+      resolve: (d, i) => { if (i === 1) { me().inj = Math.max(me().inj, randInt(1, 2)); return `Sensible. You miss ${me().inj} match${me().inj > 1 ? 'es' : ''}.`; } if (rand() < 0.3) { me().inj = Math.max(me().inj, randInt(3, 6)); return `It tore. You are out for ${me().inj} matches.`; } return 'You got away with it.'; } },
+    p_charity: { mode: 'player', w: 4,
+      when: () => ({}),
+      card: () => ({ icon: '💚', title: 'Charity visit', text: 'The club asks you to visit a children\'s hospital on your day off.', choices: ['Of course', 'Not this time'] }),
+      resolve: (d, i) => { if (i === 0) { formAdd(me(), 0.6); return 'The visit went viral. The fans love you even more.'; } return 'Another player went instead.'; } },
+    p_scout: { mode: 'player', w: 5,
+      when: () => { const big = Object.values(S.clubs).filter((cl) => isClub(cl) && prestige(cl.id) > prestige(C().clubId) + 3); return big.length ? { cl: pick(big).id } : null; },
+      card: (d) => ({ icon: '🔭', title: 'Scouts in the stands', text: `Word is that ${clubName(d.cl)} are sending scouts to watch you this week.`, choices: ['Keep calm and play your game', 'Go all out to impress'] }),
+      resolve: (d, i) => { if (i === 1) { formAdd(me(), 0.7); if (rand() < 0.12) { me().inj = Math.max(me().inj, 2); return 'You overdid it in training and picked up a knock.'; } } if (rand() < (i ? 0.45 : 0.3) && me().ovr >= clubRating(d.cl) - 6) { C().offers.push({ id: 'o' + C().dayIdx + '-sc', clubId: d.cl, amount: niceRound(playerValue(me()) * 1.2), wage: niceWage(me().wage * 1.5), years: 4, until: C().dayIdx + 20, role: roleAt(d.cl, me()) }); return `${clubName(d.cl)} liked what they saw. There is an offer waiting.`; } return 'The scouts left without making a move. This time.'; } },
+  };
+  function maybeEvent() {
+    const c = C();
+    const pm = isPlayerMode();
+    const cand = Object.entries(EVENTS).filter(([, e]) => e.mode === 'both' || e.mode === (pm ? 'player' : 'manager'));
+    for (let tries = 0; tries < 5; tries++) {
+      const [id, e] = weighted(cand, ([, x]) => x.w) || [];
+      if (!e) return;
+      const d = e.when(c);
+      if (!d) continue;
+      if (c.event) resolveEvent(c.event.opts.length - 1, true); // an unanswered event gets the default answer
+      const cd = e.card(d);
+      if (e.apply) e.apply(d);
+      c.event = { id, d, icon: cd.icon, title: cd.title, text: cd.text, opts: cd.choices, date: curDate() };
+      news(`${cd.icon} ${cd.title}: ${cd.text}`, 'info');
+      return;
+    }
+  }
+  function resolveEvent(i, auto) {
+    const c = C(), ev = c.event;
+    if (!ev) return;
+    c.event = null;
+    const out = EVENTS[ev.id].resolve(ev.d, i);
+    (c.eventLog = c.eventLog || []).unshift({ date: ev.date, icon: ev.icon, title: ev.title, choice: ev.opts[i], out });
+    c.eventLog.length = Math.min(c.eventLog.length, 40);
+    news(`${ev.icon} ${ev.title} → ${ev.opts[i]}: ${out}`, 'info');
+    invalidate();
+    if (!auto) { save(); openModal(`<div class="event-card"><div class="ev-icon">${ev.icon}</div><h2>${esc(ev.title)}</h2><p class="muted">You chose: <strong>${esc(ev.opts[i])}</strong></p><p>${esc(out)}</p><button class="btn primary" data-act="close-modal">OK</button></div>`); }
+  }
+  function showEvent() {
+    const c = C(), ev = c.event;
+    if (!ev || $('#modal:not([hidden])')) return;
+    openModal(`<div class="event-card"><div class="ev-kicker">Unexpected event · ${fmtDate(ev.date, true)}</div><div class="ev-icon">${ev.icon}</div><h2>${esc(ev.title)}</h2><p>${esc(ev.text)}</p>
+      <div class="ev-choices">${ev.opts.map((o, i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-act="ev-choose" data-id="${i}">${esc(o)}</button>`).join('')}</div></div>`);
+  }
+
+  /* --- Contracts, resignation and retirement --- */
+  function payoffFor(p) { const weeks = Math.max(8, (p.contract - C().season) * 52 + 20); return niceRound(p.wage * weeks * 0.5); }
+  function terminatePlayer(pid) {
+    const c = C(), p = S.players[pid], club = S.clubs[c.clubId];
+    const err = canSell(p); if (err) return toast(err, 'bad');
+    const pay = payoffFor(p);
+    if (club.budget < pay) return toast(`You need ${money(pay)} in your budget to pay him off.`, 'bad');
+    club.budget -= pay;
+    movePlayer(p, 'FA'); cleanLineup();
+    c.transfers.unshift({ season: c.season, date: curDate(), pid, name: p.name, dir: 'out', club: 'Contract terminated', fee: 0 });
+    news(`✂️ ${p.name}'s contract has been terminated by mutual consent. Pay-off: ${money(pay)}.`, 'info');
+    save(); toast(`${p.name} has left the club.`, 'good');
+  }
+  function jobOffers() {
+    const c = C(), cur = prestige(c.clubId);
+    const clubs = Object.values(S.clubs).filter((cl) => isClub(cl) && cl.id !== c.clubId && cl.pids.length);
+    const good = shuffle(clubs.filter((cl) => { const pr = prestige(cl.id); return pr >= cur - 7 && pr <= cur + 3; })).slice(0, 3);
+    const rescue = shuffle(clubs.filter((cl) => { const t = leagueTable(cl.leagueId); return t.slice(-4).some((r) => r.id === cl.id) && (S.leagues[cl.leagueId].tier || 1) === 1; }))[0];
+    return (rescue && !good.includes(rescue) ? good.concat(rescue) : good).map((cl) => cl.id);
+  }
+  function takeJob(clubId) {
+    const c = C(), old = S.clubs[c.clubId], to = S.clubs[clubId];
+    for (const p of loanedOut()) { movePlayer(p, p.loan.from); p.loan = null; }
+    c.loans = [];
+    c.clubId = to.id; c.leagueId = to.leagueId;
+    to.formation = to.formation || pickFormation(to);
+    c.formation = to.formation; c.roles = []; c.style = 'balanced'; c.mentality = 'balanced';
+    c.lineup = bestXI(to.pids, c.formation);
+    c.offers = []; c.talks = {};
+    invalidate();
+    c.wageBudget = niceRound(wageBill() * 1.12);
+    (c.jobs = c.jobs || []).push({ season: c.season, date: curDate(), from: old.name, to: to.name });
+    news(`🤝 ${c.manager} leaves ${old.name} and is appointed manager of ${to.name}. Budget ${money(to.budget)}.`, 'good');
+    save();
+  }
+  function retireCareer() {
+    const c = C();
+    c.retired = { date: curDate(), season: c.season };
+    news(isPlayerMode() ? `👋 ${me().name} announces his retirement from professional football.` : `👋 ${c.manager} retires from management.`, 'info');
+    save();
+  }
+  function careerTotals() {
+    const c = C();
+    if (isPlayerMode()) {
+      const p = me(), rows = (p.hist || []).concat(p.st.apps ? [{ s: c.season, c: clubName(p.clubId), a: p.st.apps, g: p.st.goals, as: p.st.assists }] : []);
+      return { apps: rows.reduce((a, r) => a + r.a, 0), goals: rows.reduce((a, r) => a + r.g, 0), assists: rows.reduce((a, r) => a + (r.as || 0), 0), clubs: [...new Set(c.transfers.filter((x) => x.pid === p.id && x.club && x.to).map((x) => x.club).concat(rows.map((r) => r.c)))], seasons: new Set(rows.map((r) => r.s)).size, caps: (p.intl || [0, 0])[0], intlGoals: (p.intl || [0, 0])[1], peak: Math.max(p.ovr, ...rows.map((r) => r.o || 0)) };
+    }
+    return { seasons: c.history.length + (c.seasonOver ? 0 : 1), clubs: [...new Set(c.history.map((h) => h.club).concat(clubName(c.clubId)))] };
+  }
+  function retiredHtml() {
+    const c = C(), t = careerTotals(), pm = isPlayerMode(), name = pm ? me().name : c.manager;
+    const awards = c.trophies.filter((x) => /Ballon|Trophy|Award|Golden Boot|Club of the Year/.test(x.name));
+    const titles = c.trophies.filter((x) => !awards.includes(x));
+    return `
+      <section class="card retire-card">
+        <div class="gh-kicker">${pm ? 'Player career' : 'Managerial career'} · ${seasonLabel(c.retired.season)}</div>
+        <h2>👋 ${esc(name)} retires</h2>
+        <p class="muted">Thank you for the memories. Here is the career in numbers.</p>
+        <div class="stats-row">
+          ${pm ? `<div class="big-stat"><span>Appearances</span><strong>${t.apps}</strong></div><div class="big-stat"><span>Goals</span><strong>${t.goals}</strong></div><div class="big-stat"><span>Assists</span><strong>${t.assists}</strong></div><div class="big-stat"><span>International caps</span><strong>${t.caps} (${t.intlGoals} goals)</strong></div><div class="big-stat"><span>Peak OVR</span><strong>${t.peak}</strong></div>` : `<div class="big-stat"><span>Seasons</span><strong>${t.seasons}</strong></div>`}
+          <div class="big-stat"><span>Trophies</span><strong>${titles.length}</strong></div><div class="big-stat"><span>Individual awards</span><strong>${awards.length}</strong></div>
+        </div>
+        <h4>Clubs</h4><p>${t.clubs.map(esc).join(' → ')}</p>
+        ${titles.length ? `<h4>Trophy cabinet</h4><div class="stats-row">${titles.map((x) => `<div class="big-stat"><span>${seasonLabel(x.season)}</span><strong>🏆 ${esc(x.name)}</strong></div>`).join('')}</div>` : ''}
+        ${awards.length ? `<h4>Individual awards</h4><ul class="plist">${awards.map((x) => `<li>🏅 ${esc(x.name)}</li>`).join('')}</ul>` : ''}
+        ${pm ? `<h4>Career</h4>${careerTableHtml(me(), true)}` : ''}
+        <div class="row gap wrap mt"><button class="btn play3d" data-act="farewell">🎬 Farewell ceremony</button><button class="btn primary big" data-act="new-career">Start a new career</button></div>
+      </section>`;
+  }
+  function careerMovesHtml() {
+    const c = C(), pm = isPlayerMode();
+    return `
+      <section class="card">
+        <h3>🚪 ${pm ? 'Contract & retirement' : 'Your job'}</h3>
+        ${pm ? `<p class="muted small">Want a fresh start? Terminate your contract by mutual consent and join a club as a free agent, or hang up your boots.</p>
+          <div class="row gap wrap"><button class="btn" data-act="p-terminate">Terminate my contract</button><button class="btn ghost danger" data-act="retire">Retire from football</button></div>`
+          : `<p class="muted small">Look for a new challenge, or call it a day. ${(c.jobs || []).length ? `Previous jobs: ${(c.jobs || []).map((j) => esc(j.from)).join(', ')}.` : ''}</p>
+          <div class="row gap wrap"><button class="btn" data-act="resign">Resign and find a new club</button><button class="btn ghost danger" data-act="retire">Retire from management</button></div>`}
+        ${(c.eventLog || []).length ? `<h4>Recent events</h4><ul class="plist">${c.eventLog.slice(0, 6).map((e) => `<li><span>${e.icon} <strong>${esc(e.title)}</strong> · ${esc(e.choice)}<br><span class="muted small">${esc(e.out)}</span></span><span class="ml-auto muted small">${fmtDate(e.date)}</span></li>`).join('')}</ul>` : ''}
+      </section>`;
+  }
+
   function startNextSeason() {
     const c = C();
     if (!c.seasonOver) return;
@@ -2070,7 +2302,7 @@
       p.ovr0 = p.ovr; p.xp = (p.xp || 0) * 0.5;
       p.form = 0; p.inj = 0; p.sus = 0; p.st = newStats(); p.cg = {}; p.loanClub = null;
       if (p.clubId !== c.clubId && p.id !== c.pid && !p.loan) p.wage = wageFor(p); // your players keep the wage they signed for
-      if (p.age >= 35 && p.id !== c.pid && rand() < 0.25 + (p.age - 35) * 0.2) retired.push(p);
+      if (p.id !== c.pid && (p.retire || (p.age >= 35 && rand() < 0.25 + (p.age - 35) * 0.2))) retired.push(p);
     }
     for (const p of retired) {
       const club = S.clubs[p.clubId];
@@ -2683,9 +2915,9 @@
       wage: niceWage(wageFor(p) * (1.1 + rand() * 0.4)), years: randInt(3, 5), until: c.dayIdx + 4, role: roleAt(cl.id, p),
     }));
   }
-  function joinClub(o) {
+  function joinClub(o, free) {
     const c = C(), p = me(), from = S.clubs[c.clubId], to = S.clubs[o.clubId];
-    if (!windowInfo().open) return toast('The transfer window is closed.', 'bad');
+    if (!free && !windowInfo().open) return toast('The transfer window is closed.', 'bad');
     from.budget += o.amount; to.budget -= o.amount;
     movePlayer(p, to.id);
     p.wage = o.wage;
@@ -3102,8 +3334,8 @@
     const hue = club.hue ?? [...club.id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 360, 7);
     return `<span class="crest ${size}" style="--h:${hue}">${esc((club.short || club.name).slice(0, 4))}</span>`;
   };
-  const statusIcons = (p) => (p.inj > 0 ? `<span class="tag bad" title="Injured for ${p.inj} match(es)">INJ ${p.inj}</span>` : '') + (p.sus > 0 ? '<span class="tag warn" title="Suspended">SUS</span>' : '') + (p.away ? '<span class="tag intl" title="Away on international duty">INTL</span>' : '');
-  const unavailWhy = (p) => (!p ? 'unavailable' : p.inj > 0 ? 'injured' : p.away ? 'away on international duty' : 'suspended');
+  const statusIcons = (p) => (p.inj > 0 ? `<span class="tag bad" title="Injured for ${p.inj} match(es)">INJ ${p.inj}</span>` : '') + (p.sus > 0 ? '<span class="tag warn" title="Suspended">SUS</span>' : '') + (p.away ? '<span class="tag intl" title="Away on international duty">INTL</span>' : '') + (p.leave > 0 ? `<span class="tag warn" title="On leave for ${p.leave} match(es)">LEAVE</span>` : '') + (p.homesick > 0 ? '<span class="tag" title="Homesick: his form is suffering">HOMESICK</span>' : '');
+  const unavailWhy = (p) => (!p ? 'unavailable' : p.inj > 0 ? 'injured' : p.away ? 'away on international duty' : p.leave > 0 ? 'on leave' : 'suspended');
   const natTag = (code) => (code && NATIONS[code] ? `<span class="nat" title="${esc(NATIONS[code].name)}">${code}</span>` : '');
   const formDots = (f) => f.slice(-5).map((r) => `<span class="fd fd-${r}">${r}</span>`).join('');
   const playerLink = (p) => `<button class="link" data-act="player" data-id="${p.id}">${esc(p.name)}</button>`;
@@ -3257,9 +3489,11 @@
         </div>
       </header>
       <nav class="tabs">${(pm ? TABS_PLAYER : TABS).map(([id, label]) => `<button class="tab ${view === id ? 'active' : ''}" data-act="tab" data-id="${id}">${label}${id === 'home' && c.offers.length ? `<span class="dot">${c.offers.length}</span>` : ''}</button>`).join('')}</nav>
-      <main id="view" class="view">${renderView()}</main>`;
+      <main id="view" class="view">${c.retired ? retiredHtml() : renderView()}</main>`;
+    if (c.retired) return;
     if (view === 'match' && ui.playback) mountPlayback();
     if (c.celebrate && c.celebrate.length && !ui.playback && !ui.celebrating) setTimeout(playCelebrations, 350);
+    else if (c.event && !ui.playback && !ui.celebrating) setTimeout(showEvent, 300);
     else if (c.galaPending && !ui.playback && !ui.celebrating && ui.galaAsked !== c.galaPending) { ui.galaAsked = c.galaPending; setTimeout(galaInvite, 400); }
   }
   function renderView() {
@@ -3325,7 +3559,7 @@
    * ------------------------------------------------------------------ */
   function viewHome() {
     const c = C(), club = S.clubs[c.clubId], uid = c.clubId;
-    if (c.seasonOver) return seasonSummaryHtml();
+    if (c.seasonOver) return seasonSummaryHtml() + careerMovesHtml();
     const nm = nextUserMatch();
     const squad = club.pids.map((id) => S.players[id]);
     const risers = squad.filter((p) => p.ovr !== p.ovr0).sort((a, b) => (b.ovr - b.ovr0) - (a.ovr - a.ovr0)).slice(0, 5);
@@ -3375,6 +3609,7 @@
           <h3>News</h3>
           <ul class="news">${c.news.slice(0, 14).map((n) => `<li class="n-${n.type}"><span class="muted small">${fmtDate(n.date)}</span> ${esc(n.text)}</li>`).join('')}</ul>
         </section>
+        ${careerMovesHtml()}
       </div>`;
   }
 
@@ -3862,13 +4097,14 @@
           <p class="muted small">How you play when you are on the pitch. It changes how often you shoot, create or head crosses, and the commentary.</p>
           <label class="inline">Player type <select class="input sm" id="my-role" data-change="my-role">${ROLE_GROUPS[roleGroup(p.pos)].map(([id, label]) => `<option value="${id}" ${p.role === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
           <h3 class="mt">Contract</h3>
-          <p class="small">You earn <strong class="money">${money(p.wage)}</strong> a week until <strong>${contractLabel(p)}</strong>.</p>
+          <p class="small">You earn <strong class="money">${money(p.wage)}</strong> a week until <strong>${contractLabel(p)}</strong>.${p.endorse ? ` Endorsements: <strong class="money">${money(p.endorse)}</strong> a week.` : ''}</p>
           ${(() => { const r = c.pRenew && c.pRenew.season === c.season ? c.pRenew : null; if (!r) return '<button class="btn" data-act="p-renew-ask">Ask the club for a new contract</button>';
             if (r.withdrawn) return '<p class="muted small">The club has ended contract talks for this season.</p>';
             if (r.done) return '<p class="muted small">You signed a new contract this season.</p>';
             return `<div class="offer"><div><strong>${esc(clubName(c.clubId))}</strong> offer <span class="money">${money(r.wage)}/wk</span> for ${r.years} years</div><div class="row gap"><button class="btn primary sm" data-act="p-renew-sign">Sign</button></div></div>
               <div class="row gap wrap"><label class="inline">Ask for (€K/week) <input class="input sm" id="p-ask-renew" type="number" min="1" value="${Math.round(r.wage * 1.2 / 1000)}"></label><button class="btn sm" data-act="p-renew-counter">Negotiate</button></div>${r.msg ? `<div class="notice info">${esc(r.msg)}</div>` : ''}`; })()}
         </section>
+        ${careerMovesHtml()}
         <section class="card">
           <h3>Transfers</h3>
           <div class="notice ${win.open ? 'good' : ''}"><strong>${esc(win.label)}.</strong> ${win.open ? 'You can ask your agent to find you a new club.' : 'Clubs can only sign you during a transfer window.'}</div>
@@ -4588,7 +4824,7 @@
           <label class="inline">Position <select class="input sm" id="edit-pos">${POSITIONS.map((x) => `<option ${x === p.pos ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
           <button class="btn sm" data-act="save-player" data-id="${p.id}">Save</button></div>
         <div class="row gap mt">
-          ${inCareer && mine && !isPlayerMode() ? `<button class="btn" data-act="loan" data-id="${p.id}">Loan out</button> <button class="btn" data-act="sell" data-id="${p.id}">Sell / release</button>` : ''}
+          ${inCareer && mine && !isPlayerMode() ? `<button class="btn" data-act="loan" data-id="${p.id}">Loan out</button> <button class="btn" data-act="sell" data-id="${p.id}">Sell / release</button> <button class="btn ghost danger" data-act="terminate" data-id="${p.id}">Terminate contract (${money(payoffFor(p))})</button>` : ''}
           ${inCareer && p.loan && p.loan.from === C().clubId ? `<button class="btn" data-act="recall" data-id="${p.id}">Recall from loan</button>` : ''}
           ${inCareer && !mine && !isPlayerMode() ? `<button class="btn primary" data-act="buy" data-id="${p.id}">${p.clubId === 'FA' ? 'Sign' : 'Make an offer'}</button>` : ''}
         </div>
@@ -4690,8 +4926,32 @@
     },
     simulate: () => doSimulate(),
     play3d: () => play3d(),
+    'ev-choose': (i) => { closeModal(); resolveEvent(+i); render(); },
+    'close-modal': () => closeModal(),
+    terminate: (id) => askConfirm(`Terminate ${S.players[id].name}'s contract? You pay him off with ${money(payoffFor(S.players[id]))} and he becomes a free agent.`, () => { terminatePlayer(id); closeModal(); render(); }, 'Terminate'),
+    resign: () => {
+      const ids = jobOffers();
+      if (!ids.length) return toast('No clubs are looking for a manager right now.', 'bad');
+      openModal(`<h2>🤝 Job offers</h2><p class="muted">These clubs want to talk to you. Taking a job means leaving ${esc(clubName(C().clubId))} straight away.</p>
+        <ul class="offer-list loan-list">${ids.map((id) => { const cl = S.clubs[id], t = leagueTable(cl.leagueId), pos = t.findIndex((r) => r.id === id) + 1; return `<li>${crest(cl)}<div class="grow"><strong>${esc(cl.name)}</strong> ${ovrBadge(clubRating(id))} <span class="muted small">${esc(S.leagues[cl.leagueId].name)} · ${ordinal(pos)}</span><br><span class="small">Budget <strong class="money">${money(cl.budget)}</strong>${pos > t.length - 4 ? ' · <span class="tag warn">Relegation fight</span>' : ''}</span></div><button class="btn primary sm" data-act="take-job" data-id="${id}">Accept</button></li>`; }).join('')}</ul>`);
+    },
+    'take-job': (id) => { closeModal(); takeJob(id); go('home'); },
+    retire: () => askConfirm(isPlayerMode() ? 'Retire from professional football? Your career ends here.' : 'Retire from management? Your career ends here.', () => { retireCareer(); render(); }, 'Retire'),
+    'p-terminate': () => {
+      const c = C(), P = me();
+      const offers = shuffle(Object.values(S.clubs).filter((cl) => isClub(cl) && cl.id !== c.clubId && cl.pids.length && cl.pids.length < 32)
+        .sort((x, y) => Math.abs(clubRating(x.id) - P.ovr - 1) - Math.abs(clubRating(y.id) - P.ovr - 1)).slice(0, 10)).slice(0, 4)
+        .map((cl) => ({ id: 'free-' + cl.id, clubId: cl.id, amount: 0, wage: niceWage(wageFor(P) * (0.95 + rand() * 0.3)), years: randInt(2, 4), until: c.dayIdx + 5, role: roleAt(cl.id, P) }));
+      if (!offers.length) return toast('No club is ready to sign you as a free agent right now.', 'bad');
+      ui.freeOffers = offers;
+      openModal(`<h2>✂️ Terminate your contract</h2><p class="muted">${esc(clubName(C().clubId))} agree to let you go for free. These clubs would sign you straight away:</p>
+        <ul class="offer-list loan-list">${offers.map((o, i) => `<li>${crest(S.clubs[o.clubId])}<div class="grow"><strong>${esc(clubName(o.clubId))}</strong> <span class="muted small">${esc(S.leagues[S.clubs[o.clubId].leagueId]?.name || '')}</span><br><span class="small">${money(o.wage)}/wk · ${o.years} years · ${esc(o.role)}</span></div><button class="btn primary sm" data-act="p-free-join" data-id="${i}">Sign</button></li>`).join('')}</ul>`);
+    },
+    'p-free-join': (i) => { const o = ui.freeOffers && ui.freeOffers[+i]; if (!o) return; closeModal(); joinClub(o, true); news('✂️ You terminated your contract by mutual consent.', 'info'); go('career'); },
+    farewell: () => { const c = C(), pm = isPlayerMode(), p = pm ? me() : null; if (!window.SM3D || !window.SM3D.celebrate) return; window.SM3D.celebrate({ kind: 'farewell', hue: clubHue(S.clubs[c.clubId]), star: { pid: pm ? p.id : 'mgr', name: pm ? p.name : c.manager, num: 10 }, kicker: pm ? 'A legend says goodbye' : 'The end of an era', title: `Thank you, ${(pm ? p.name : c.manager).split(' ').pop()}!`, sub: pm ? (() => { const t = careerTotals(); return `${t.apps} games · ${t.goals} goals · ${c.trophies.length} trophies`; })() : `${careerTotals().seasons} seasons · ${c.trophies.length} trophies`, onDone: () => {}, onSkipAll: () => {} }); },
+    'new-career': () => askConfirm('Start a new career? This retired career will be deleted.', () => { try { localStorage.removeItem(SAVE_KEY); localStorage.removeItem(META_KEY); } catch (e) { /* ignore */ } S = null; renderStart(); }, 'Start new'),
     'gala-attend': () => { const y = C().galaPending; closeModal(); playGala(y); },
-    'gala-skip': () => { C().galaPending = null; closeModal(); save(); go('awards'); },
+    'gala-skip': () => { C().galaPending = null; closeModal(); save(); render(); toast('The gala results are in the Awards tab.', 'info'); },
     'gala-watch': (y) => playGala(+y),
     'replay-celebrations': () => { const c = C(); c.celebrate = (c.lastCelebrate || []).slice(); playCelebrations(); },
     'skip-playback': () => finishPlayback(),
