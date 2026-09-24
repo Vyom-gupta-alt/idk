@@ -18,7 +18,10 @@ Every match you watch shows a pitch with 22 dots and the ball, driven minute by 
 
 ## Play the match yourself (3D)
 On the Match tab, **🎮 Play Match (3D)** puts you on the pitch in a real-time 3D match (three.js, loaded on demand) instead of simulating it. The score, scorers and assists you play become the official result.
-- **Controls:** WASD / arrows move, **Shift** sprint, **Space** hold to charge a shot and release to shoot (W/S aims far/near post) or tackle without the ball, **E** pass, **Q** through ball (or switch player when defending), **R** lob / cross, **Esc** pause.
+- **Controls:** WASD / arrows move, **Shift** sprint, **Space** hold for a power shot (W/S aims far/near post) or standing tackle without the ball, **F** curled finesse shot, **X** skill move with the ball or slide tackle without it, **E** pass, **Q** through ball (or switch player when defending), **R** lob / cross, **C** camera, **Esc** pause.
+- **Referee:** fouls (late slides and tackles from behind are riskier), free kicks with a 9.15 m wall distance, penalties for fouls in the box, yellow and red cards (a second yellow means red, and so does denying a clear goal-scoring chance), sent-off players leave the pitch (an outfielder goes in goal if the keeper is sent off), and offside when a pass reaches a player beyond the last defender. Cards count toward suspensions.
+- **FC-style feel:** stamina drains while sprinting, acceleration depends on pace, and sprinting knocks the ball further ahead (Technical players keep it close). Skill moves beat tackles, and dribbling, defending and physical attributes decide duels.
+- **PlayStyles & PlayStyles+:** every player gets FC-style PlayStyles from their attributes (for example Rapid, Quick Step, Technical, Press Proven, Finesse Shot, Power Shot, Incisive Pass, Tiki Taka, Long Ball Pass, Intercept, Anticipate, Slide Tackle, Bruiser and Relentless, plus Far Reach and Footwork for keepers). The best get PlayStyles+ (◆). They change how players move, pass, shoot, tackle and save in the 3D match, and they show on player profiles and on the in-match HUD with your stamina bar.
 - **Manager career:** you control the whole team and switch players. **Player career:** you control only yourself, and **E** calls for the ball.
 - Player ratings and attributes drive the game: pace sets speed, shooting sets accuracy, passing sets pass error, defending wins tackles, and keeper ratings decide saves. Out-of-position players are weaker.
 - Human-looking players with jointed arms and legs, running and kicking animations, kits with shirt numbers, varied skin tones, hairstyles and heights, and real-time shadows. Press **C** to switch camera (Broadcast, Close, Wide).
@@ -59,6 +62,7 @@ On the Match tab, **🎮 Play Match (3D)** puts you on the pitch in a real-time 
   - An International tab shows fixtures, groups, brackets and winners.
   - Players away on duty are marked INTL and miss club matches.
   - In player career, choose your nationality and earn caps.
+- **Trophy celebrations:** 3D cutscenes when you win your league (your team jumping around the podium as the captain lifts the trophy, with confetti, fireworks and camera flashes) or the Champions League, and a spot-lit stage ceremony when you (player career) or one of your players (manager) wins the **Ballon d'Or** or your league's **Golden Boot**. The Ballon d'Or top 3 is decided each season from form, goals, assists, ratings and trophies, and shown in the season summary. You can rewatch the celebrations from the season summary.
 - **Compressed saves:** saves are gzip-compressed so large worlds fit in browser storage.
 - **FC 26 ratings import** (CSV/JSON): `Name`/`short_name`/`long_name`, `Club`/`club_name`, `Position`/`player_positions`, `OVR`/`overall`, `Age`, `League`.
 - **Match engine:** a minute-by-minute simulation with live text commentary, stats, player ratings, extra time and penalty shootouts. 9 formations and 4 mentalities.

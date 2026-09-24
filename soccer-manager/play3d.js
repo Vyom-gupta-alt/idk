@@ -34,6 +34,7 @@
       </div>
       <div class="m3d-msg"></div>
       <div class="m3d-power"><i></i></div>
+      <div class="m3d-pcard"><div class="m3d-pname"></div><div class="m3d-ps"></div><div class="m3d-sta"><i></i></div></div>
       <canvas class="m3d-radar" width="210" height="136"></canvas>
       <div class="m3d-keys"></div>
       <div class="m3d-menu hidden"></div>
@@ -52,6 +53,7 @@
     });
   }
 
+  const PS_NAME = { rapid: 'Rapid', quickstep: 'Quick Step', technical: 'Technical', pressproven: 'Press Proven', finesse: 'Finesse Shot', powershot: 'Power Shot', incisive: 'Incisive Pass', tikitaka: 'Tiki Taka', longball: 'Long Ball', intercept: 'Intercept', anticipate: 'Anticipate', slidetackle: 'Slide Tackle', bruiser: 'Bruiser', relentless: 'Relentless', farreach: 'Far Reach', footwork: 'Footwork' };
   const CAMS = [
     { name: 'Broadcast', h: 17, d: 26, ly: 0, fx: 0.9, fz: 0.45, zc: 12, edge: 8 },
     { name: 'Close', h: 7.5, d: 13, ly: 0.8, fx: 1, fz: 0.8, zc: 26, edge: 2, follow: true },
@@ -200,7 +202,7 @@
       this.total = (cfg.minutes || 5) * 60;
       this.t = 0; this.half = 1;
       this.score = [0, 0];
-      this.goals = []; this.text = [];
+      this.goals = []; this.text = []; this.cards = []; this.sentOff = [];
       this.st = { poss: [0, 0], shots: [0, 0], sot: [0, 0], corners: [0, 0], yc: [0, 0], rc: [0, 0] };
       this.keys = {}; this.prev = {};
       this.paused = true; this.over = false;
@@ -227,10 +229,13 @@
       this.cfg.teams.forEach((tm, side) => {
         for (const p of tm.players) {
           const spd = 5.6 + (p.pac - 50) * 0.05;
+          const ps = p.ps || {};
           this.players.push({
-            ...p, side, isGK: p.slot === 'GK',
+            ...p, ps, side, isGK: p.slot === 'GK',
             x: 0, z: 0, vx: 0, vz: 0, face: side === this.cfg.userSide ? 0 : Math.PI,
             spd: clamp(spd, 5, 8.4), cd: 0, stun: 0, tcd: 0, run: rnd() * 6, hold: 0,
+            acc: clamp(4.5 + (p.pac - 60) * 0.07 + (ps.quickstep || 0) * 1.4, 3, 10),
+            sta: 100, spr: false, skillT: 0, slideT: 0, yc: 0,
           });
         }
       });
@@ -240,6 +245,16 @@
       if (this.cfg.aiOnly) this.ctrl = null; // testing: both sides AI
     }
     aOf(p, x) { return this.dir[p.side] * x; } // "attacking" coordinate for p's team
+    // Offside line for attackers of `side`: the second-last opponent (usually the last defender), never behind halfway.
+    offLine(side) {
+      const a = this.players.filter((q) => q.side !== side).map((q) => this.dir[side] * q.x).sort((x, y) => y - x);
+      return Math.max(0, a[1] ?? 0);
+    }
+    isOffside(m) {
+      const am = this.aOf(m, m.x);
+      return am > 0 && am > this.aOf(m, this.ball.x) + 0.3 && am > this.offLine(m.side) + 0.3;
+    }
+    inBox(side, x, z) { const gx = -this.dir[side] * PL; return Math.abs(x - gx) <= 16.5 && Math.abs(z) <= 20.16; } // side's own box
     goalX(side) { return this.dir[side] * PL; }  // goal that `side` attacks
 
     initScene() {
@@ -369,15 +384,15 @@
       q('.m3d-t0').innerHTML = `<i style="background:${cols[0].css}"></i>${esc(t[0].short || t[0].name)}`;
       q('.m3d-t1').innerHTML = `${esc(t[1].short || t[1].name)}<i style="background:${cols[1].css}"></i>`;
       q('.m3d-keys').innerHTML = this.teamMode
-        ? '<b>WASD</b> move · <b>Shift</b> sprint · <b>Space</b> shoot (hold) / tackle · <b>E</b> pass · <b>Q</b> through ball / switch player · <b>R</b> lob / cross · <b>C</b> camera · <b>Esc</b> pause'
-        : '<b>WASD</b> move · <b>Shift</b> sprint · <b>Space</b> shoot (hold) / tackle · <b>E</b> pass / call for the ball · <b>Q</b> through ball · <b>R</b> lob / cross · <b>C</b> camera · <b>Esc</b> pause';
-      this.hud = { sc: q('.m3d-sc'), clock: q('.m3d-clock'), msg: q('.m3d-msg'), power: q('.m3d-power'), bar: q('.m3d-power i'), radar: q('.m3d-radar'), menu: q('.m3d-menu') };
+        ? '<b>WASD</b> move · <b>Shift</b> sprint · <b>Space</b> shoot / tackle · <b>F</b> finesse · <b>X</b> skill move / slide · <b>E</b> pass · <b>Q</b> through / switch · <b>R</b> lob · <b>C</b> camera · <b>Esc</b> pause'
+        : '<b>WASD</b> move · <b>Shift</b> sprint · <b>Space</b> shoot / tackle · <b>F</b> finesse · <b>X</b> skill move / slide · <b>E</b> pass / call · <b>Q</b> through · <b>R</b> lob · <b>C</b> camera · <b>Esc</b> pause';
+      this.hud = { pname: q('.m3d-pname'), ps: q('.m3d-ps'), sta: q('.m3d-sta i'), sc: q('.m3d-sc'), clock: q('.m3d-clock'), msg: q('.m3d-msg'), power: q('.m3d-power'), bar: q('.m3d-power i'), radar: q('.m3d-radar'), menu: q('.m3d-menu') };
       this.cols = cols;
     }
     bind() {
       this.kd = (e) => {
         const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-        if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(k) || 'wasdeqr'.includes(k)) e.preventDefault();
+        if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Shift'].includes(k) || 'wasdeqrfx'.includes(k)) e.preventDefault();
         if (k === 'c' && !e.repeat) { this.camMode = ((this.camMode || 0) + 1) % CAMS.length; this.flash(`Camera: ${CAMS[this.camMode].name}`, 0.8); return; }
         if (k === 'Escape' || k === 'p') { if (!this.over) this.paused ? this.resume() : this.showMenu('pause'); return; }
         this.keys[k] = true;
@@ -401,8 +416,8 @@
       const m = this.hud.menu;
       m.classList.remove('hidden');
       const help = `<ul class="m3d-help">${this.teamMode
-        ? '<li><b>W A S D</b> or arrows: move · <b>Shift</b>: sprint</li><li><b>Space</b>: hold to charge a shot, release to shoot. W/S while shooting aims at the far/near post. Without the ball: tackle.</li><li><b>E</b>: pass to the team-mate you are facing · <b>Q</b>: through ball (with the ball) or switch to the player nearest the ball</li><li><b>R</b>: lofted pass or cross</li>'
-        : '<li><b>W A S D</b> or arrows: move · <b>Shift</b>: sprint. You only control yourself; your team-mates play on their own.</li><li><b>Space</b>: hold to charge a shot, release to shoot. Without the ball: tackle.</li><li><b>E</b>: pass, or call for the ball when a team-mate has it · <b>Q</b>: through ball · <b>R</b>: lofted pass / cross</li>'}</ul>`;
+        ? '<li><b>W A S D</b> or arrows: move · <b>Shift</b>: sprint (uses stamina, and you knock the ball further ahead)</li><li><b>Space</b>: hold for a power shot, release to shoot (W/S aims) · <b>F</b>: curled finesse shot · without the ball <b>Space</b> is a standing tackle</li><li><b>X</b>: skill move with the ball (side-step a defender) · slide tackle without it (fouls and cards!)</li><li><b>E</b>: pass · <b>Q</b>: through ball, or switch player when defending · <b>R</b>: lofted pass / cross</li><li>Offside is called when a pass reaches a team-mate who was beyond the last defender.</li>'
+        : '<li><b>W A S D</b> or arrows: move · <b>Shift</b>: sprint (uses stamina). You only control yourself.</li><li><b>Space</b>: hold for a power shot · <b>F</b>: finesse shot · without the ball <b>Space</b> tackles</li><li><b>X</b>: skill move with the ball, slide tackle without it</li><li><b>E</b>: pass, or call for the ball · <b>Q</b>: through ball · <b>R</b>: lofted pass / cross</li><li>Stay onside: time your runs with the last defender.</li>'}</ul>`;
       if (kind === 'start') m.innerHTML = `<h2>${esc(this.cfg.teams[0].name)} v ${esc(this.cfg.teams[1].name)}</h2><p class="muted">${esc(this.cfg.compName || '')} · ${this.cfg.minutes} minute match · you attack to the right →</p>${help}<button class="btn primary big" data-m3d="resume">Kick off</button>`;
       else m.innerHTML = `<h2>Paused</h2><p>${this.score[0]} - ${this.score[1]} · ${this.minute()}'</p>${help}<div class="row gap"><button class="btn primary" data-m3d="resume">Resume</button><button class="btn ghost" data-m3d="finish">End match now (keep this score)</button></div>`;
     }
@@ -419,6 +434,7 @@
       let a = attacking ? -36 + p.fx * 76 + (ba + 5) * 0.32 : -46 + p.fx * 54 + ba * 0.38;
       if (kickoff) a = Math.min(-1.5, -44 + p.fx * 44);
       a = clamp(a, -47, 46);
+      if (attacking && !kickoff) a = Math.min(a, this.offLine(p.side) - 0.6);
       let z = p.fz * (attacking ? 29 : 21) + (kickoff ? 0 : this.ball.z * 0.28);
       return { x: d * a, z: clamp(z, -32, 32) };
     }
@@ -444,7 +460,7 @@
     restart(kind, side, x, z) {
       // Throw-in, corner or goal kick: the nearest player of `side` takes it.
       const b = this.ball;
-      Object.assign(b, { vx: 0, vy: 0, vz: 0, y: BR, owner: null, pass: null, shot: null, checked: false });
+      Object.assign(b, { vx: 0, vy: 0, vz: 0, y: BR, owner: null, pass: null, shot: null, checked: false, spin: 0 });
       let taker;
       if (kind === 'goalkick') {
         taker = this.players.find((p) => p.side === side && p.isGK);
@@ -454,16 +470,36 @@
       }
       b.x = x; b.z = z;
       taker.x = x - this.dir[side] * 0.5 * (kind === 'goalkick' ? -1 : 1); taker.z = z;
+      if (kind === 'freekick' || kind === 'offside') {
+        // Opponents back off 9.15 m; everyone waits for the kick.
+        for (const q of this.players) {
+          if (q.side === side || q.isGK) continue;
+          const dx = q.x - x, dz = q.z - z, dd = hyp(dx, dz);
+          if (dd < 9.2) { const k = 9.3 / (dd || 1); q.x = x + (dd ? dx : -this.dir[side]) * k; q.z = z + (dd ? dz : 0) * k; }
+        }
+        this.setPiece = taker;
+      }
       this.giveBall(taker);
-      taker.hold = kind === 'goalkick' ? 1.0 : 0.5;
+      taker.hold = kind === 'goalkick' ? 1.0 : kind === 'freekick' ? 1.2 : 0.5;
       if (this.teamMode && side === this.cfg.userSide && !taker.isGK) this.ctrl = taker;
       this.phase = 'dead'; this.deadT = 0.9;
-      const label = { throw: 'Throw-in', corner: 'Corner', goalkick: 'Goal kick' }[kind];
-      this.flash(`${label} · ${this.cfg.teams[side].short || this.cfg.teams[side].name}`, 1.0);
+      const label = { throw: 'Throw-in', corner: 'Corner', goalkick: 'Goal kick', freekick: 'Free kick', offside: 'Free kick' }[kind];
+      if (kind !== 'offside') this.flash(`${label} · ${this.cfg.teams[side].short || this.cfg.teams[side].name}`, 1.0);
       if (kind === 'corner') { this.st.corners[side]++; this.say('info', side, `Corner to ${this.cfg.teams[side].name}.`); }
     }
     giveBall(p) {
       const b = this.ball;
+      if (b.pass && b.pass.off === p && this.phase === 'play') {
+        // Offside: free kick to the defending side where he received it.
+        const side = 1 - p.side;
+        this.say('info', p.side, `Offside! ${p.name} was beyond the last defender when the pass was played.`);
+        this.flash(`🚩 Offside · ${p.name}`, 1.4);
+        this.st.off = this.st.off || [0, 0]; this.st.off[p.side]++;
+        b.owner = null; b.vx = b.vz = 0; b.pass = null;
+        const x = clamp(p.x, -PL + 1, PL - 1), z = clamp(p.z, -PW + 1, PW - 1);
+        this.phase = 'dead'; this.deadT = 1.1; this.after = () => this.restart('offside', side, x, z);
+        return;
+      }
       if (b.pass && b.pass.side === p.side && b.pass.pid !== p.pid) b.assist = { pid: b.pass.pid, side: p.side, t: this.t };
       else if (!b.pass || b.pass.side !== p.side) b.assist = null;
       b.owner = p; b.pass = null; b.shot = null; b.checked = false; b.lastSide = p.side; b.last = p;
@@ -498,19 +534,20 @@
         const cos = (rx * ux + rz * uz) / d;
         if (cos < 0.45) continue;
         const open = this.nearestOpp(m).d;
-        const sc = cos * 12 - d * 0.18 + Math.min(open, 8) * 0.6 + (through ? this.aOf(p, rx) * 0.1 : 0);
+        const sc = cos * 12 - d * 0.18 + Math.min(open, 8) * 0.6 + (through ? this.aOf(p, rx) * 0.1 : 0) - (this.isOffside(m) ? 9 : 0);
         if (sc > bs) { bs = sc; best = m; }
       }
       return best;
     }
     doPass(p, m, kind) {
       const b = this.ball;
-      const err = (1 - p.pas / 100) * (kind === 'lob' ? 0.12 : 0.07) + 0.01;
+      const psk = kind === 'lob' ? p.ps.longball : kind === 'through' ? p.ps.incisive : p.ps.tikitaka;
+      const err = ((1 - p.pas / 100) * (kind === 'lob' ? 0.12 : 0.07) + 0.01) * (1 - (psk || 0) * 0.22);
       let tx = m.x + m.vx * 0.5, tz = m.z + m.vz * 0.5;
       if (kind === 'through') { tx = m.x + this.dir[p.side] * 7; tz = m.z + clamp(-m.z * 0.15, -3, 3); }
       const d = hyp(tx - b.x, tz - b.z);
-      this.kickTo(p, tx, tz, kind === 'lob' ? 30 : clamp(9 + d * 0.55, 10, 26), kind === 'lob', err);
-      b.pass = { pid: p.pid, side: p.side, to: m, t: this.t };
+      this.kickTo(p, tx, tz, kind === 'lob' ? 30 : clamp(9 + d * 0.55, 10, 26) * (kind === 'ground' && p.ps.tikitaka ? 1.1 : 1), kind === 'lob', err);
+      b.pass = { pid: p.pid, side: p.side, to: m, t: this.t, off: this.isOffside(m) ? m : null };
     }
     cross(p) {
       // Lofted ball into the box when there is no clear team-mate.
@@ -524,14 +561,31 @@
       let tz = aimZ != null ? aimZ : (gk && gk.z > 0 ? -1 : 1) * (1.4 + rnd() * 1.6);
       const dist = hyp(gx - b.x, tz - b.z);
       const ty = 0.3 + power * power * 1.9 + (dist > 25 ? 0.4 : 0);
-      const speed = 17 + power * 15 + (p.sho - 60) * 0.06;
-      const err = (1 - p.sho / 100) * 0.2 + 0.015 + power ** 3 * 0.04 + (dist > 16 ? (dist - 16) * 0.003 : 0);
+      const speed = 17 + power * 15 + (p.sho - 60) * 0.06 + (p.ps.powershot || 0) * 1.6;
+      const err = (1 - p.sho / 100) * 0.2 + 0.018 + power ** 3 * 0.04 + (dist > 16 ? (dist - 16) * 0.003 : 0) + (p.spr ? 0.035 : 0);
       this.release(p);
       const t = dist / speed;
       const ang = Math.atan2(tz - b.z, gx - b.x) + gauss() * err;
       b.vx = Math.cos(ang) * speed; b.vz = Math.sin(ang) * speed;
       b.vy = clamp((ty - BR) / t + 0.5 * G * t + gauss() * err * 12, 0, 16);
       b.y = BR + 0.02;
+      b.shot = { pid: p.pid, side: p.side, t: this.t }; b.checked = false; b.pass = null; b.spin = 0;
+      this.st.shots[p.side]++;
+    }
+    finesse(p, iz) {
+      // Curled shot towards the far post (or the side you aim with W/S): slower, but placed.
+      const b = this.ball, gx = this.goalX(p.side);
+      const side = iz ? Math.sign(iz) : Math.abs(p.z) < 3 ? (rnd() < 0.5 ? 1 : -1) : -Math.sign(p.z);
+      const tz = side * 2.9, bend = side * -1.8; // start outside the post, curl back in
+      const dist = hyp(gx - b.x, tz - b.z), speed = 19 + (p.sho - 60) * 0.05;
+      const t = dist / speed;
+      const err = ((1 - p.sho / 100) * 0.16 + 0.012 + (dist > 18 ? (dist - 18) * 0.004 : 0)) * (1 - (p.ps.finesse || 0) * 0.28);
+      this.release(p);
+      const ang = Math.atan2(tz - bend - b.z, gx - b.x) + gauss() * err;
+      b.vx = Math.cos(ang) * speed; b.vz = Math.sin(ang) * speed;
+      b.vy = clamp((1.1 - BR) / t + 0.5 * G * t, 0, 12);
+      b.y = BR + 0.02;
+      b.spin = (2 * bend) / (t * t);
       b.shot = { pid: p.pid, side: p.side, t: this.t }; b.checked = false; b.pass = null;
       this.st.shots[p.side]++;
     }
@@ -564,13 +618,15 @@
           const m = this.passTarget(p, this.dir[p.side] * (0.6 + rnd()), gauss() * 0.8, rnd() < 0.3);
           if (m) return this.doPass(p, m, hyp(m.x - p.x, m.z - p.z) > 30 ? 'lob' : rnd() < 0.2 ? 'through' : 'ground');
         }
-        // Dribble towards goal, veering away from the nearest defender.
+        // Dribble towards goal, veering away from the nearest defender; skill moves to beat him.
         let tz = p.z * 0.75;
         if (pr.d < 6) tz += (p.z > pr.p.z ? 1 : -1) * 6;
         p.aim = { x: gx, z: clamp(tz, -30, 30) };
+        if (pr.d < 2.6 && p.skillT <= 0 && rnd() < (p.dri - 60) / 120) this.skillMove(p, 0, p.z > pr.p.z ? 1 : -1);
+        p.aiSpr = pr.d > 7 && this.aOf(p, pr.p.x) < this.aOf(p, p.x) && p.sta > 45 && dist > 22; // space ahead: go
       }
       const a = p.aim || { x: gx, z: p.z };
-      this.moveTo(p, a.x, a.z, dt, 0.92);
+      this.moveTo(p, a.x, a.z, dt, p.aiSpr ? 1.25 : 0.92);
     }
     aiOffBall(p, dt, chasers) {
       const b = this.ball, poss = b.owner ? b.owner.side : b.pass ? b.pass.side : -1;
@@ -579,8 +635,10 @@
       if (chasers.has(p)) {
         const o = b.owner;
         const tx = o ? o.x - this.dir[o.side] * 0.8 : b.x + b.vx * 0.25, tz = o ? o.z : b.z + b.vz * 0.25;
-        this.moveTo(p, tx, tz, dt, 1.05);
-        if (o && o.side !== p.side && p.tcd <= 0 && hyp(o.x - p.x, o.z - p.z) < 1.4) this.tackle(p, o);
+        this.moveTo(p, tx, tz, dt, p.sta > 35 && hyp(tx - p.x, tz - p.z) > 4 ? 1.25 : 1.05);
+        const od = o ? hyp(o.x - p.x, o.z - p.z) : 99;
+        if (o && o.side !== p.side && p.tcd <= 0 && od < 1.4) this.tackle(p, o, false);
+        else if (o && o.side !== p.side && p.tcd <= 0 && od < 2.8 && od > 1.8 && p.def > 68 && rnd() < 0.006) this.slide(p);
         return;
       }
       const f = this.formationPos(p, poss === p.side, false);
@@ -597,24 +655,117 @@
       const tx = gx + d * (1.2 + clamp((PL - Math.abs(b.x - gx)) * 0.03, 0, 2.5));
       this.moveTo(p, tx, tz, dt, 1.1);
     }
-    tackle(p, o) {
-      p.tcd = 0.9;
-      const pr = clamp(0.4 + (p.def - o.dri) / 70, 0.12, 0.85);
-      if (rnd() < pr) {
+    skillMove(p, ix, iz) {
+      // A quick side-step with the ball: defenders struggle to tackle for a moment.
+      let sx = -Math.sin(p.face), sz = Math.cos(p.face);
+      if (iz || ix) { const dot = sx * ix + sz * iz; if (dot < 0) { sx = -sx; sz = -sz; } }
+      else if (rnd() < 0.5) { sx = -sx; sz = -sz; }
+      const pow = 3.5 + (p.dri - 60) * 0.06 + (p.ps.technical || 0) * 0.8;
+      p.vx += sx * pow; p.vz += sz * pow;
+      p.skillT = 0.5 + (p.ps.technical || 0) * 0.1;
+    }
+    slide(p) {
+      p.slideT = 0.55; p.tcd = 1.2; p.slid = false;
+      const o = this.ball.owner;
+      if (o && (p !== this.ctrl)) p.face = Math.atan2(o.z - p.z, o.x - p.x);
+      const sp = Math.max(6.5, hyp(p.vx, p.vz) + 1.5);
+      p.vx = Math.cos(p.face) * sp; p.vz = Math.sin(p.face) * sp;
+    }
+    tackle(p, o, slide) {
+      p.tcd = slide ? 1.2 : 0.9;
+      const ps = p.ps, ops = o.ps;
+      // Coming from behind? (tackler is behind the direction the dribbler faces)
+      const bx = p.x - o.x, bz = p.z - o.z, bd = hyp(bx, bz) || 1;
+      const behind = (Math.cos(o.face) * bx + Math.sin(o.face) * bz) / bd < -0.35;
+      let foulP = (slide ? 0.2 : 0.07) + (behind ? 0.3 : 0) + (p.def < 60 ? 0.05 : 0)
+        - (slide ? (ps.slidetackle || 0) * 0.07 : (ps.anticipate || 0) * 0.025);
+      let pr = 0.4 + (p.def - o.dri) / 70 + (slide ? 0.12 : 0) + (ps.anticipate || 0) * 0.07 + (ps.bruiser || 0) * 0.05
+        - (ops.pressproven || 0) * 0.07 - (o.skillT > 0 ? 0.28 : 0) + (o.spr && !ops.technical ? 0.12 : 0) - (ops.bruiser ? 0.04 : 0);
+      pr = clamp(pr, 0.06, 0.9);
+      const won = rnd() < pr;
+      if (!won) foulP *= 1.6;
+      if (rnd() < clamp(foulP, 0.02, 0.7)) return this.foul(p, o, slide, behind);
+      if (won) {
         const b = this.ball; this.release(o); o.stun = 0.45; o.cd = 0.6;
         b.vx = (p.x - o.x) * 2 + this.dir[p.side] * 3 + gauss() * 2; b.vz = (p.z - o.z) * 2 + gauss() * 2;
-        if (rnd() < 0.5) this.giveBall(p);
-      } else { p.stun = 0.55; }
+        if (rnd() < (slide ? 0.2 : 0.5)) this.giveBall(p);
+      } else { p.stun = slide ? 0.9 : 0.55; }
+    }
+    foul(f, v, slide, behind) {
+      const b = this.ball, cfg = this.cfg;
+      const vd = this.dir[v.side];
+      // Denying an obvious goal-scoring opportunity: no outfield defender between the victim and goal.
+      const va = vd * v.x;
+      const cover = this.players.filter((q) => q.side === f.side && q !== f && !q.isGK && vd * q.x > va).length;
+      const dogso = cover === 0 && va > 28 && Math.abs(v.z) < 18;
+      let card = null;
+      if (dogso && rnd() < 0.5) card = 'r';
+      else if (rnd() < (slide ? 0.3 : 0.12) + (behind ? 0.3 : 0)) card = f.yc && rnd() < 0.7 ? 'r2' : f.yc ? null : 'y';
+      const min = this.minute(), fname = f.name, tname = cfg.teams[f.side].name;
+      this.st.fouls = this.st.fouls || [0, 0]; this.st.fouls[f.side]++;
+      this.say('info', f.side, `Foul by ${fname} on ${v.name}${slide ? ' (sliding tackle)' : behind ? ' (from behind)' : ''}.`);
+      let msg = 'Foul!';
+      if (card === 'y') { f.yc = 1; this.hudFor = null; this.cards.push({ min, side: f.side, pid: f.pid, type: 'y' }); this.st.yc[f.side]++; msg = `🟨 Yellow card · ${fname}`; this.say('info', f.side, `🟨 Yellow card for ${fname} (${tname}).`); }
+      else if (card) {
+        this.cards.push({ min, side: f.side, pid: f.pid, type: 'r' }); this.st.rc[f.side]++;
+        msg = `🟥 ${card === 'r2' ? 'Second yellow! ' : ''}Red card · ${fname}`;
+        this.say('info', f.side, `🟥 ${card === 'r2' ? 'Second yellow card: ' : 'Red card! '}${fname} is sent off${dogso && card === 'r' ? ' for denying a clear goal-scoring chance' : ''}.`);
+      }
+      this.flash(msg, card ? 2.2 : 1.1);
+      const pen = this.inBox(f.side, v.x, v.z);
+      b.owner = null; b.vx = b.vz = 0; b.pass = null; b.shot = null;
+      for (const q of this.players) q.slideT = 0;
+      this.phase = 'dead'; this.deadT = card ? 2 : 1.1;
+      this.after = () => {
+        if (card && card !== 'y') this.sendOff(f);
+        if (pen) this.penalty(v.side);
+        else this.restart('freekick', v.side, clamp(v.x, -PL + 1, PL - 1), clamp(v.z, -PW + 1, PW - 1));
+      };
+    }
+    sendOff(p) {
+      this.players = this.players.filter((q) => q !== p);
+      this.sentOff.push(p);
+      p.mesh.visible = false;
+      if (this.ctrl === p) this.ctrl = this.teamMode ? this.players.find((q) => q.side === p.side && !q.isGK) : null;
+      if (p.isGK) {
+        // An outfielder goes in goal.
+        const g = this.players.filter((q) => q.side === p.side).sort((a, c) => this.aOf(a, a.x) - this.aOf(c, c.x))[0];
+        if (g) { g.isGK = true; g.gk = 38; g.slot = 'GK'; if (this.ctrl === g) this.ctrl = this.players.find((q) => q.side === p.side && !q.isGK); }
+      }
+    }
+    penalty(side) {
+      const b = this.ball, d = this.dir[side], gx = d * PL;
+      Object.assign(b, { x: d * (PL - 11), z: 0, y: BR, vx: 0, vy: 0, vz: 0, owner: null, pass: null, shot: null, checked: false, spin: 0 });
+      const taker = this.players.filter((q) => q.side === side && !q.isGK).sort((a, c) => (c.sho + (c.ps.finesse || 0) * 3) - (a.sho + (a.ps.finesse || 0) * 3))[0];
+      for (const q of this.players) {
+        if (q === taker) continue;
+        if (q.isGK && q.side !== side) { q.x = gx - d * 0.3; q.z = 0; continue; }
+        if (Math.abs(q.x - gx) < 18.5) q.x = gx - d * (18.5 + rnd() * 3);
+      }
+      taker.x = b.x - d * 0.9; taker.z = 0; taker.face = d > 0 ? 0 : Math.PI;
+      this.giveBall(taker); taker.hold = 1.2;
+      if (this.teamMode && side === this.cfg.userSide) this.ctrl = taker;
+      this.setPiece = taker;
+      this.phase = 'dead'; this.deadT = 1.0;
+      this.flash(`Penalty! · ${this.cfg.teams[side].short || this.cfg.teams[side].name}`, 1.5);
+      this.say('chance', side, `Penalty to ${this.cfg.teams[side].name}! ${taker.name} steps up.`);
+    }
+    sprintMul(p) {
+      const tired = p.sta < 25 ? 0.35 : 1;
+      return 1 + (0.3 + (p.ps.rapid || 0) * 0.03) * tired;
     }
     moveTo(p, tx, tz, dt, pace) {
       const dx = tx - p.x, dz = tz - p.z, d = hyp(dx, dz);
+      p.spr = pace > 1 && d > 3;
+      if (p.spr) pace = this.sprintMul(p) * (pace / 1.25);
       const max = p.spd * pace * (p.stun > 0 ? 0.25 : 1);
       const want = d < 0.4 ? 0 : Math.min(max, d * 2.2);
       const ux = d ? dx / d : 0, uz = d ? dz / d : 0;
       this.accel(p, ux * want, uz * want, dt);
     }
     accel(p, vx, vz, dt) {
-      const k = Math.min(1, dt * 7);
+      if (p.slideT > 0) return; // sliding: momentum only
+      const k = Math.min(1, dt * p.acc);
       p.vx += (vx - p.vx) * k; p.vz += (vz - p.vz) * k;
     }
 
@@ -631,10 +782,17 @@
       const p = this.ctrl, b = this.ball;
       if (!p || p.isGK) { this.prev = { ...this.keys }; return; }
       const { ix, iz } = this.input();
-      const sprint = this.keys.Shift;
+      const sprint = !!this.keys.Shift && !!(ix || iz);
       const has = b.owner === p;
-      const sp = p.spd * (sprint ? 1.3 : 1) * (has ? 0.92 : 1) * (p.stun > 0 ? 0.25 : 1);
+      p.spr = sprint;
+      const sp = p.spd * (sprint ? this.sprintMul(p) : 1) * (has ? 0.93 : 1) * (p.stun > 0 ? 0.25 : 1);
       this.accel(p, ix * sp, iz * sp, dt);
+      // X: skill move with the ball, slide tackle without it.
+      if (this.pressed('x')) {
+        if (has && p.skillT <= 0) this.skillMove(p, ix, iz);
+        else if (!has && p.slideT <= 0 && p.stun <= 0) this.slide(p);
+      }
+      if (has && this.pressed('f')) { this.finesse(p, iz); this.charge = -1; this.prev = { ...this.keys }; return; }
       if (ix || iz) p.face = Math.atan2(iz, ix);
       const fdx = ix || Math.cos(p.face), fdz = iz || Math.sin(p.face);
       // Shooting: hold space to charge.
@@ -646,7 +804,7 @@
         this.charge = -1;
         if (this.pressed(' ')) {
           const o = b.owner;
-          if (o && o.side !== p.side && hyp(o.x - p.x, o.z - p.z) < 2.2 && p.tcd <= 0) this.tackle(p, o);
+          if (o && o.side !== p.side && hyp(o.x - p.x, o.z - p.z) < 2.2 && p.tcd <= 0) this.tackle(p, o, false);
           else { p.tcd = 0.5; }
         }
       }
@@ -664,9 +822,10 @@
     /* ---------------- simulation step ---------------- */
     step(dt) {
       const b = this.ball, cfg = this.cfg;
-      for (const p of this.players) { p.cd -= dt; p.stun -= dt; p.tcd -= dt; p.hold -= dt; }
+      for (const p of this.players) { p.cd -= dt; p.stun -= dt; p.tcd -= dt; p.hold -= dt; p.skillT -= dt; }
       if (this.phase === 'dead') {
         this.deadT -= dt;
+        for (const p of this.players) { p.sta = Math.min(100, p.sta + 2 * dt); p.slideT = 0; }
         for (const p of this.players) { p.vx *= 0.8; p.vz *= 0.8; }
         if (this.deadT <= 0) { if (this.after) { const f = this.after; this.after = null; f(); } else this.phase = 'play'; }
         this.stepBall(dt, true);
@@ -674,7 +833,7 @@
       }
       this.t += dt;
       if (this.half === 1 && this.t >= this.total / 2) {
-        this.half = 2; this.say('ht', -1, `Half-time: ${cfg.teams[0].name} ${this.score[0]}-${this.score[1]} ${cfg.teams[1].name}`);
+        this.half = 2; for (const p of this.players) p.sta = Math.min(100, p.sta + 35); this.say('ht', -1, `Half-time: ${cfg.teams[0].name} ${this.score[0]}-${this.score[1]} ${cfg.teams[1].name}`);
         this.flash('Half-time', 2); this.phase = 'dead'; this.deadT = 2; this.after = () => this.kickoff(1 - cfg.userSide, false);
         return;
       }
@@ -696,11 +855,28 @@
           chasers.add(p); n--;
         }
       }
+      if (this.setPiece && b.owner !== this.setPiece) this.setPiece = null;
       for (const p of this.players) {
         if (p === this.ctrl && !p.isGK) continue;
+        if (this.setPiece && p !== this.setPiece && !p.isGK) { p.spr = false; this.accel(p, 0, 0, dt); continue; } // wait for the kick
         if (b.owner === p) this.aiCarrier(p, dt); else this.aiOffBall(p, dt, chasers);
       }
       this.user(dt);
+      if (this.phase !== 'play') return;
+      // Slide tackles in progress
+      for (const p of this.players) {
+        if (p.slideT <= 0) continue;
+        p.slideT -= dt; p.vx *= Math.exp(-2.2 * dt); p.vz *= Math.exp(-2.2 * dt);
+        const o = b.owner;
+        if (o && o.side !== p.side && !p.slid && hyp(o.x - p.x, o.z - p.z) < 1.5) { p.slid = true; this.tackle(p, o, true); if (this.phase !== 'play') return; }
+        if (!o && !p.slid && hyp(b.x - p.x, b.z - p.z) < 1.4 && b.y < 0.6) { p.slid = true; b.vx = p.vx * 1.3 + gauss(); b.vz = p.vz * 1.3 + gauss(); b.last = p; b.lastSide = p.side; }
+        if (p.slideT <= 0) { p.stun = Math.max(p.stun, 0.6); p.slid = false; }
+      }
+      // Stamina: sprinting drains it, jogging recovers it.
+      for (const p of this.players) {
+        const drain = 9 * (1 - (p.ps.rapid || 0) * 0.12) * (1 - (p.ps.relentless || 0) * 0.2);
+        p.sta = clamp(p.sta + (p.spr && hyp(p.vx, p.vz) > p.spd * 0.9 ? -drain : 3.5) * dt, 0, 100);
+      }
       for (const p of this.players) {
         p.x = clamp(p.x + p.vx * dt, -PL - 2, PL + 2); p.z = clamp(p.z + p.vz * dt, -PW - 2, PW + 2);
         const sp = hyp(p.vx, p.vz);
@@ -714,12 +890,14 @@
       const b = this.ball;
       if (b.owner) {
         const o = b.owner;
-        const tx = o.x + Math.cos(o.face) * 0.7, tz = o.z + Math.sin(o.face) * 0.7;
+        const reach = o.spr ? (o.ps.technical ? 0.85 : 1.25) : 0.6; // close control vs knock-on
+        const tx = o.x + Math.cos(o.face) * reach, tz = o.z + Math.sin(o.face) * reach;
         const k = Math.min(1, dt * 12);
         b.x += (tx - b.x) * k; b.z += (tz - b.z) * k; b.y = BR; b.vx = o.vx; b.vz = o.vz; b.vy = 0;
         return;
       }
       b.vy -= G * dt;
+      if (b.spin && b.y > BR + 0.005) b.vz += b.spin * dt; else b.spin = 0;
       b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
       if (b.y <= BR) { b.y = BR; if (b.vy < -1.2) b.vy = -b.vy * 0.45; else b.vy = 0; }
       const fr = b.y <= BR + 0.01 ? Math.exp(-0.95 * dt) : Math.exp(-0.06 * dt);
@@ -738,11 +916,11 @@
         const toward = -d * b.vx;
         if (b.checked || toward < 6 || Math.abs(b.x - gk.x) > 1.3 || b.last === gk) continue;
         b.checked = true;
-        const reach = 1.6 + (gk.gk - 60) * 0.03;
+        const reach = 1.6 + (gk.gk - 60) * 0.03 + (gk.ps.farreach || 0) * 0.3;
         const dz = Math.abs(b.z - gk.z), hi = b.y > 2.3;
         if (dz > reach + 0.6 || hi) continue;
         const sp = hyp(b.vx, b.vz);
-        const pr = clamp(0.62 + (gk.gk - 72) / 45 + (reach - dz) / reach * 0.3 - (sp - 22) / 50, 0.12, 0.97);
+        const pr = clamp(0.66 + (gk.ps.footwork || 0) * 0.04 + (gk.gk - 72) / 45 + (reach - dz) / reach * 0.3 - (sp - 22) / 50, 0.12, 0.97);
         if (rnd() < pr) {
           const shooter = b.shot;
           if (shooter) this.st.sot[shooter.side]++;
@@ -761,7 +939,8 @@
       for (const p of this.players) {
         if (p.cd > 0 || p.stun > 0) continue;
         const d = hyp(p.x - b.x, p.z - b.z);
-        if (d >= bd) continue;
+        const reach = b.pass && b.pass.side !== p.side ? 1.05 + (p.ps.intercept || 0) * 0.3 : 1.05;
+        if (d >= reach || (best && d >= bd)) continue;
         // Fast shots are hard to stop for outfield players.
         if (b.shot && b.shot.side !== p.side && sp > 16 && rnd() < 0.8) continue;
         best = p; bd = d;
@@ -787,7 +966,7 @@
       }
     }
     deadThen(f) { const b = this.ball; b.vx *= 0.2; b.vz *= 0.2; this.phase = 'dead'; this.deadT = 0.7; this.after = f; }
-    nameOf(pid) { return this.players.find((p) => p.pid === pid)?.name || '—'; }
+    nameOf(pid) { return (this.players.find((p) => p.pid === pid) || this.sentOff.find((p) => p.pid === pid))?.name || '—'; }
     goal(side) {
       const b = this.ball, cfg = this.cfg;
       this.score[side]++;
@@ -823,7 +1002,8 @@
       m.innerHTML = `<h2>${won ? '🎉 Victory!' : drew ? 'Full-time' : 'Defeat'}</h2>
         <p class="m3d-final">${esc(cfg.teams[0].name)} <b>${this.score[0]} - ${this.score[1]}</b> ${esc(cfg.teams[1].name)}${pens ? `<br><span class="muted">Penalties ${pens[0]}-${pens[1]}</span>` : ''}</p>
         <ul class="m3d-goals">${this.goals.map((g) => `<li>${g.min}' ${g.og ? 'Own goal' : esc(this.nameOf(g.pid))}${g.apid ? ` <span class="muted">(${esc(this.nameOf(g.apid))})</span>` : ''} · ${esc(cfg.teams[g.side].short || cfg.teams[g.side].name)}</li>`).join('') || '<li class="muted">No goals</li>'}</ul>
-        <p class="muted small">Shots ${this.st.shots[0]}-${this.st.shots[1]} · On target ${this.st.sot[0]}-${this.st.sot[1]} · Possession ${this.st.poss[0]}%-${this.st.poss[1]}%</p>
+        ${this.cards.length ? `<p class="small">${this.cards.map((c) => `${c.type === 'r' ? '🟥' : '🟨'} ${esc(this.nameOf(c.pid))} ${c.min}'`).join(' · ')}</p>` : ''}
+        <p class="muted small">Shots ${this.st.shots[0]}-${this.st.shots[1]} · On target ${this.st.sot[0]}-${this.st.sot[1]} · Possession ${this.st.poss[0]}%-${this.st.poss[1]}% · Fouls ${(this.st.fouls || [0, 0]).join('-')} · Offsides ${(this.st.off || [0, 0]).join('-')}</p>
         <button class="btn primary big" data-m3d="done">Continue</button>`;
     }
     shootout() {
@@ -839,7 +1019,7 @@
     }
     finish() {
       this.destroy();
-      this.cfg.onDone({ score: this.score.slice(), goals: this.goals, pens: this.pens || null, st: this.st, text: this.text });
+      this.cfg.onDone({ score: this.score.slice(), goals: this.goals, cards: this.cards, pens: this.pens || null, st: this.st, text: this.text });
     }
     destroy() {
       cancelAnimationFrame(this.raf);
@@ -883,6 +1063,13 @@
         this.arrow.position.set(c.x, 2.55 + Math.sin(performance.now() / 200) * 0.08, c.z);
         this.nameTag.position.set(c.x, 3.15, c.z);
         this.setLabel(c.name.split(' ').slice(-1)[0]);
+        if (this.hudFor !== c) {
+          this.hudFor = c;
+          this.hud.pname.innerHTML = `<b>${esc(c.name)}</b> <span>${esc(c.slot)} · ${c.ovr}</span>${c.yc ? ' 🟨' : ''}`;
+          this.hud.ps.innerHTML = Object.entries(c.ps || {}).map(([k, v]) => `<span class="${v > 1 ? 'plus' : ''}">${v > 1 ? '◆' : '◇'} ${PS_NAME[k] || k}${v > 1 ? '+' : ''}</span>`).join('');
+        }
+        this.hud.sta.style.width = `${Math.round(c.sta)}%`;
+        this.hud.sta.className = c.sta < 25 ? 'low' : '';
       }
       // Broadcast camera: follows the ball from the near touchline.
       const mode = CAMS[this.camMode || 0];
@@ -918,5 +1105,215 @@
   }
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-  window.SM3D = { start };
+  /* ================= Trophy celebrations (cutscenes) ================= */
+  function kitColors(T, hue) {
+    const h = ((hue ?? 210) % 360) / 360;
+    return { kit: new T.Color().setHSL(h, 0.7, 0.45), shorts: new T.Color().setHSL(h, 0.5, 0.18), socks: new T.Color().setHSL(h, 0.7, 0.4), gk: new T.Color(0xfacc15), css: `hsl(${Math.round(h * 360)} 70% 45%)` };
+  }
+  function celebrate(cfg) {
+    const root = document.createElement('div');
+    root.id = 'm3d'; root.className = 'celebr';
+    root.innerHTML = `
+      <div class="m3d-stage"></div>
+      <div class="cel-text"><div class="cel-kicker"></div><h1 class="cel-title"></h1><div class="cel-sub"></div></div>
+      <div class="cel-btns"><button class="btn ghost" data-cel="skip">Skip all</button><button class="btn primary" data-cel="next">Continue</button></div>
+      <div class="m3d-loading">Loading…</div>`;
+    document.body.appendChild(root);
+    document.body.classList.add('m3d-open');
+    const q = (x) => root.querySelector(x);
+    q('.cel-kicker').textContent = cfg.kicker || '';
+    q('.cel-title').textContent = cfg.title || '';
+    q('.cel-sub').textContent = cfg.sub || '';
+    let scene = null;
+    const close = (all) => {
+      if (scene) scene.destroy();
+      window.removeEventListener('keydown', onKey);
+      root.remove(); document.body.classList.remove('m3d-open');
+      if (all && cfg.onSkipAll) cfg.onSkipAll(); else cfg.onDone && cfg.onDone();
+    };
+    const onKey = (e) => { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') { e.preventDefault(); close(e.key === 'Escape'); } };
+    window.addEventListener('keydown', onKey);
+    root.addEventListener('click', (e) => { const a = e.target.closest('[data-cel]')?.dataset.cel; if (a) close(a === 'skip'); });
+    setTimeout(() => root.classList.add('show'), 60);
+    loadThree((err) => {
+      q('.m3d-loading').remove();
+      if (err) { root.classList.add('flat'); return; }
+      scene = new Celebration(cfg, root);
+    });
+  }
+  class Celebration {
+    constructor(cfg, root) {
+      const T = (this.T = window.THREE);
+      this.cfg = cfg; this.root = root; this.t = 0;
+      const r = (this.renderer = new T.WebGLRenderer({ antialias: true }));
+      r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      r.shadowMap.enabled = true; r.shadowMap.type = T.PCFSoftShadowMap;
+      root.querySelector('.m3d-stage').appendChild(r.domElement);
+      const scene = (this.scene = new T.Scene());
+      const award = cfg.kind === 'ballon' || cfg.kind === 'boot';
+      scene.background = new T.Color(award ? 0x04040a : 0x050b16);
+      scene.fog = new T.Fog(scene.background, 30, 90);
+      this.cam = new T.PerspectiveCamera(45, 1, 0.1, 300);
+      scene.add(new T.HemisphereLight(0xbcd3ff, 0x0b1a10, award ? 0.25 : 0.55));
+      const key = new T.SpotLight(0xfff3d6, award ? 2.2 : 1.4, 60, award ? 0.38 : 0.7, 0.45);
+      key.position.set(4, 18, 8); key.castShadow = true; key.shadow.mapSize.set(1024, 1024);
+      scene.add(key); scene.add(key.target);
+      const rim = new T.DirectionalLight(0x93c5fd, 0.5); rim.position.set(-10, 8, -12); scene.add(rim);
+      // Floor: pitch for team trophies, dark stage for individual awards.
+      if (award) {
+        const floor = new T.Mesh(new T.CircleGeometry(40, 48), new T.MeshStandardMaterial({ color: 0x0b0b12, roughness: 0.4, metalness: 0.3 }));
+        floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+        const beam = new T.Mesh(new T.ConeGeometry(3.2, 18, 32, 1, true), new T.MeshBasicMaterial({ color: 0xfff1c1, transparent: true, opacity: 0.07, side: T.DoubleSide, depthWrite: false }));
+        beam.position.set(0, 9, 0); scene.add(beam);
+      } else {
+        const c = document.createElement('canvas'); c.width = 512; c.height = 512;
+        const g = c.getContext('2d');
+        for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? '#1f6b3a' : '#1a5f33'; g.fillRect(i * 64, 0, 64, 512); }
+        const tex = new T.CanvasTexture(c); tex.wrapS = tex.wrapT = T.RepeatWrapping; tex.repeat.set(4, 4);
+        const floor = new T.Mesh(new T.PlaneGeometry(120, 120), new T.MeshStandardMaterial({ map: tex, roughness: 0.9 }));
+        floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+        const standMat = new T.MeshStandardMaterial({ color: 0x151b28, roughness: 0.9 });
+        for (let i = 0; i < 4; i++) { const st = new T.Mesh(new T.BoxGeometry(80, 16, 8), standMat); const a = (i / 4) * Math.PI * 2; st.position.set(Math.cos(a) * 40, 8, Math.sin(a) * 40); st.rotation.y = -a + Math.PI / 2; scene.add(st); }
+        // Crowd camera flashes
+        const n = 900, pos = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) { const a = rnd() * Math.PI * 2, rr = 35 + rnd() * 3; pos.set([Math.cos(a) * rr, 3 + rnd() * 13, Math.sin(a) * rr], i * 3); }
+        const geo = new T.BufferGeometry(); geo.setAttribute('position', new T.BufferAttribute(pos, 3));
+        this.flashes = new T.Points(geo, new T.PointsMaterial({ color: 0xffffff, size: 0.35, transparent: true, opacity: 0.9, depthWrite: false }));
+        scene.add(this.flashes);
+      }
+      // Podium
+      const pod = new T.Mesh(new T.CylinderGeometry(award ? 1.6 : 2.2, award ? 1.8 : 2.4, 0.45, 40), new T.MeshStandardMaterial({ color: 0x111827, roughness: 0.35, metalness: 0.4 }));
+      pod.position.y = 0.225; pod.castShadow = pod.receiveShadow = true; scene.add(pod);
+      const ringM = new T.Mesh(new T.TorusGeometry(award ? 1.62 : 2.22, 0.03, 8, 64), new T.MeshBasicMaterial({ color: 0xfacc15 }));
+      ringM.rotation.x = Math.PI / 2; ringM.position.y = 0.45; scene.add(ringM);
+      // People
+      const cols = [kitColors(T, cfg.hue)];
+      const kit = new HumanKit(T, cols);
+      this.people = [];
+      const list = award ? [cfg.star] : (cfg.players || []).slice(0, 11);
+      list.forEach((pl, i) => {
+        const p = { pid: pl.pid || pl.name, name: pl.name, num: pl.num || i + 1, side: 0, isGK: !!pl.isGK };
+        const h = kit.build(p);
+        let x = 0, z = 0, y = 0.45;
+        if (i > 0) { const k = i - 1, row = k < 6 ? 0 : 1, idx = row ? k - 6 : k, cnt = row ? 4 : 6; const a = Math.PI * (0.15 + (0.7 * (idx + 0.5)) / cnt); const rr = row ? 5.2 : 3.6; x = -Math.sin(a) * rr * 0.4 - (row ? 1.2 : 0.4); z = Math.cos(a) * rr * 1.25; y = 0; }
+        h.root.position.set(x, y, z);
+        h.root.rotation.y = Math.atan2(z - 30, x - 0) * 0; // face the camera side (+X)
+        scene.add(h.root);
+        this.people.push({ h, ph: rnd() * 6, cap: i === 0 });
+      });
+      // Trophy
+      this.trophy = makeTrophy(T, cfg.kind);
+      this.trophy.position.set(award ? 0.35 : 0.9, award ? 1.25 : 0.45, 0);
+      scene.add(this.trophy);
+      // Confetti
+      const N = 700;
+      this.conf = new T.InstancedMesh(new T.PlaneGeometry(0.09, 0.05), new T.MeshBasicMaterial({ side: T.DoubleSide }), N);
+      const palette = award ? [0xfacc15, 0xfde68a, 0xffffff, 0xeab308] : [cols[0].kit.getHex(), 0xffffff, 0xfacc15, cols[0].shorts.getHex(), 0xfde68a];
+      this.cp = [];
+      for (let i = 0; i < N; i++) {
+        this.cp.push({ x: (rnd() - 0.5) * 22, y: 3 + rnd() * 16, z: (rnd() - 0.5) * 22, vy: 0.8 + rnd() * 1.2, r: rnd() * 6, s: 0.5 + rnd() * 2, ph: rnd() * 6 });
+        this.conf.setColorAt(i, new T.Color(palette[i % palette.length]));
+      }
+      scene.add(this.conf);
+      this.dummy = new T.Object3D();
+      this.fw = [];
+      this.resize = () => { const w = window.innerWidth, hh = window.innerHeight; r.setSize(w, hh); this.cam.aspect = w / hh; this.cam.updateProjectionMatrix(); };
+      window.addEventListener('resize', this.resize); this.resize();
+      this.last = performance.now();
+      this.loop = this.loop.bind(this);
+      this.raf = requestAnimationFrame(this.loop);
+      window.SM3D.cel = this;
+    }
+    firework() {
+      const T = this.T, n = 140, pos = new Float32Array(n * 3), vel = [];
+      const cx = (rnd() - 0.5) * 50, cy = 14 + rnd() * 10, cz = -18 - rnd() * 14;
+      for (let i = 0; i < n; i++) { pos.set([cx, cy, cz], i * 3); const a = rnd() * Math.PI * 2, b = Math.acos(2 * rnd() - 1), sp = 5 + rnd() * 5; vel.push([Math.sin(b) * Math.cos(a) * sp, Math.cos(b) * sp, Math.sin(b) * Math.sin(a) * sp]); }
+      const geo = new T.BufferGeometry(); geo.setAttribute('position', new T.BufferAttribute(pos, 3));
+      const col = [0xfacc15, 0xf472b6, 0x60a5fa, 0x4ade80, 0xffffff, 0xf97316][Math.floor(rnd() * 6)];
+      const pts = new T.Points(geo, new T.PointsMaterial({ color: col, size: 0.45, transparent: true, opacity: 1, blending: T.AdditiveBlending, depthWrite: false }));
+      this.scene.add(pts); this.fw.push({ pts, vel, t: 0 });
+    }
+    loop(now) {
+      this.raf = requestAnimationFrame(this.loop);
+      const dt = Math.min(0.05, (now - this.last) / 1000); this.last = now; this.t += dt;
+      const t = this.t, award = this.cfg.kind === 'ballon' || this.cfg.kind === 'boot';
+      // Players: jump and cheer; the captain / winner lifts the trophy.
+      const lift = clamp((t - 2.2) / 1.2, 0, 1);
+      for (const pp of this.people) {
+        const r = pp.h, j = pp.cap && award ? 0 : Math.max(0, Math.sin(t * 5.5 + pp.ph)) * (pp.cap ? 0.18 : 0.35);
+        r.root.position.y = (pp.cap ? 0.45 : 0) + j;
+        r.body.rotation.z = -0.05;
+        r.arms.forEach((A) => { const up = pp.cap ? lift : 1; A.sh.rotation.z = 0.2 + up * (2.75 + Math.sin(t * 6 + pp.ph) * (pp.cap ? 0.05 : 0.25)); A.sh.rotation.x = A.s * (0.2 + 0.15 * up); A.el.rotation.z = 0.15; });
+        r.legs.forEach((L, i) => { L.hip.rotation.z = j > 0.05 ? (i ? -0.25 : 0.3) : 0; L.kn.rotation.z = j > 0.05 ? -0.5 : -0.05; });
+        r.head.rotation.z = -0.25 * (pp.cap ? lift : 1);
+        // Turn towards the camera.
+        const want = Math.atan2(-(this.cam.position.z - r.root.position.z), this.cam.position.x - r.root.position.x) + (pp.cap ? 0 : Math.sin(pp.ph) * 0.4);
+        let d = want - r.root.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));
+        r.root.rotation.y += d * Math.min(1, dt * 3);
+        if (pp.cap) {
+          // Held up in both hands, just in front of the head.
+          const sc = r.root.scale.y, th = r.root.rotation.y;
+          const hx = r.root.position.x + Math.cos(th) * 0.12, hz = r.root.position.z - Math.sin(th) * 0.12;
+          const top = r.root.position.y + 1.98 * sc + Math.sin(t * 3) * 0.04 - (this.cfg.kind === 'ucl' ? 0.1 : 0);
+          const x0 = award ? 0.35 : 0.9, y0 = award ? 1.25 : 0.45;
+          this.trophy.position.set(x0 + (hx - x0) * lift, y0 + (top - y0) * lift, hz * lift);
+          this.trophy.rotation.y = t * (award ? 0.8 : 0.3);
+        }
+      }
+      if (!this.people.some((p) => p.cap)) this.trophy.rotation.y = t * 0.6;
+      // Confetti
+      for (let i = 0; i < this.cp.length; i++) {
+        const c = this.cp[i];
+        c.y -= c.vy * dt; c.r += c.s * dt; c.x += Math.sin(t * 1.5 + c.ph) * 0.4 * dt;
+        if (c.y < 0.05) { c.y = 0.03; if (rnd() < 0.004) { c.y = 14 + rnd() * 6; } }
+        this.dummy.position.set(c.x, c.y, c.z); this.dummy.rotation.set(c.r, c.r * 0.7, c.r * 0.3); this.dummy.updateMatrix();
+        this.conf.setMatrixAt(i, this.dummy.matrix);
+      }
+      this.conf.instanceMatrix.needsUpdate = true;
+      // Fireworks and flashes
+      if (!award && (this.fwT = (this.fwT || 0) - dt) <= 0) { this.firework(); this.fwT = 0.35 + rnd() * 0.6; }
+      if (award && t > 1 && (this.fwT = (this.fwT || 0) - dt) <= 0) { this.firework(); this.fwT = 1.1 + rnd(); }
+      for (const f of this.fw) {
+        f.t += dt; const a = f.pts.geometry.attributes.position;
+        for (let i = 0; i < f.vel.length; i++) { const v = f.vel[i]; v[1] -= 3 * dt; a.array[i * 3] += v[0] * dt; a.array[i * 3 + 1] += v[1] * dt; a.array[i * 3 + 2] += v[2] * dt; }
+        a.needsUpdate = true; f.pts.material.opacity = Math.max(0, 1 - f.t / 1.8);
+      }
+      this.fw = this.fw.filter((f) => { if (f.t > 1.9) { this.scene.remove(f.pts); f.pts.geometry.dispose(); return false; } return true; });
+      if (this.flashes) this.flashes.material.opacity = 0.3 + Math.abs(Math.sin(t * 17)) * 0.7;
+      // Camera: slow orbit, pushing in.
+      const R = award ? 6.5 - Math.min(1.5, t * 0.15) : 12 - Math.min(3, t * 0.25);
+      const ang = 0.35 + t * 0.12;
+      this.cam.position.set(Math.cos(ang) * R, (award ? 2.2 : 4) + Math.sin(t * 0.3) * 0.4, Math.sin(ang) * R);
+      this.cam.lookAt(0, award ? 2.3 : 2.4, 0);
+      this.renderer.render(this.scene, this.cam);
+    }
+    destroy() { cancelAnimationFrame(this.raf); window.removeEventListener('resize', this.resize); this.renderer.dispose(); }
+  }
+  function makeTrophy(T, kind) {
+    const g = new T.Group();
+    const gold = new T.MeshStandardMaterial({ color: 0xffd34d, metalness: 0.45, roughness: 0.25, emissive: 0x8a5a00, emissiveIntensity: 0.55 });
+    const silver = new T.MeshStandardMaterial({ color: 0xf1f5f9, metalness: 0.4, roughness: 0.2, emissive: 0x6b7280, emissiveIntensity: 0.45 });
+    const add = (geo, m, y = 0, x = 0, z = 0) => { const o = new T.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
+    if (kind === 'ballon') {
+      add(new T.CylinderGeometry(0.12, 0.16, 0.18, 24), gold, 0.09);
+      add(new T.SphereGeometry(0.2, 32, 24), gold, 0.38);
+    } else if (kind === 'boot') {
+      add(new T.CylinderGeometry(0.14, 0.17, 0.12, 24), new T.MeshStandardMaterial({ color: 0x111111, roughness: 0.4 }), 0.06);
+      const sole = add(new T.BoxGeometry(0.34, 0.08, 0.13), gold, 0.17, 0.05); sole.rotation.z = 0.05;
+      add(new T.BoxGeometry(0.24, 0.12, 0.12), gold, 0.26, 0.02);
+      add(new T.CylinderGeometry(0.065, 0.07, 0.22, 16), gold, 0.4, -0.07);
+    } else {
+      const ucl = kind === 'ucl';
+      const pts = (ucl ? [[0.14, 0], [0.16, 0.05], [0.07, 0.12], [0.06, 0.3], [0.1, 0.42], [0.22, 0.62], [0.25, 0.78], [0.24, 0.8]] : [[0.16, 0], [0.18, 0.08], [0.06, 0.16], [0.05, 0.3], [0.16, 0.42], [0.21, 0.58], [0.2, 0.64]]).map(([x, y]) => new T.Vector2(x, y));
+      add(new T.LatheGeometry(pts, 40), ucl ? silver : gold, 0);
+      add(new T.CylinderGeometry(ucl ? 0.17 : 0.2, ucl ? 0.19 : 0.22, 0.1, 32), new T.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.4 }), -0.04);
+      for (const s of [1, -1]) {
+        const h = add(new T.TorusGeometry(ucl ? 0.2 : 0.09, ucl ? 0.018 : 0.015, 10, 32, ucl ? Math.PI * 1.25 : Math.PI), ucl ? silver : gold, ucl ? 0.52 : 0.46, 0, s * (ucl ? 0.3 : 0.22));
+        h.rotation.set(0, 0, 0); h.rotation.x = s > 0 ? 0 : Math.PI; h.rotation.z = ucl ? -Math.PI * 0.12 : Math.PI / 2 * 0 ; h.rotation.y = Math.PI / 2;
+      }
+    }
+    return g;
+  }
+
+  window.SM3D = { start, celebrate };
 })();

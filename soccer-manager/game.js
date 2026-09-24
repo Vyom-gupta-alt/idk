@@ -1340,11 +1340,12 @@
       x.g = 0; x.a = 0; x.yc = 0; x.rc = 0; x.saves = 0;
     }
     for (const g of r.goals) { if (g.pid && r.pm[g.pid]) r.pm[g.pid].g++; if (g.apid && r.pm[g.apid]) r.pm[g.apid].a++; }
+    for (const cd of f.cards || []) { const x = r.pm[cd.pid]; if (!x) continue; if (cd.type === 'r') x.rc = 1; else x.yc = 1; }
     const res = r.score[0] > r.score[1] ? [1, -1] : r.score[0] < r.score[1] ? [-1, 1] : [0, 0];
     let best = -1;
     for (const [pid, x] of Object.entries(r.pm)) {
       const p = S.players[pid], conc = r.score[1 - x.side], line = LINE[x.slot];
-      let rt = 6.3 + (p.ovr - 75) * 0.03 + (rand() - 0.5) * 0.6 + x.g * 1.0 + x.a * 0.6 + res[x.side] * 0.35;
+      let rt = 6.3 + (p.ovr - 75) * 0.03 + (rand() - 0.5) * 0.6 + x.g * 1.0 + x.a * 0.6 + res[x.side] * 0.35 - x.yc * 0.2 - x.rc * 1.5;
       if (line === 'GK') rt += (conc === 0 ? 0.7 : 0) - conc * 0.25;
       else if (line === 'DEF') rt += (conc === 0 ? 0.5 : 0) - conc * 0.18;
       x.rating = clamp(Math.round(rt * 10) / 10, 3, 10);
@@ -1370,6 +1371,7 @@
         return {
           pid: p.id, name: p.name, num: i + 1, slot: x.slot, fx: (100 - f[2]) / 100, fz: (f[1] - 50) / 50, ovr: p.ovr,
           pac: gk ? a('SPD') : a('PAC'), sho: gk ? 35 : a('SHO'), pas: gk ? a('KIC') : a('PAS'), dri: gk ? 40 : a('DRI'), def: gk ? 45 : a('DEF'), phy: gk ? 60 : a('PHY'),
+          ps: Object.fromEntries(playStyles(p).map((z) => [z.id, z.plus ? 2 : 1])),
           gk: x.slot === 'GK' ? (gk ? Math.round((attr(p, 'DIV') + attr(p, 'REF') + attr(p, 'HAN') + attr(p, 'POS')) / 4) : 35) : 30,
         };
       }),
@@ -1428,6 +1430,39 @@
     const base = p.ovr + (pr ? pr[0] : -20) + Math.round((hash01(p.id + k) - 0.5) * 8);
     return clamp(base + ((p.tb && p.tb[k]) || 0), 15, 99);
   }
+  // FC-style PlayStyles (and PlayStyles+ for the very best), derived from attributes.
+  const PLAYSTYLES = [
+    ['rapid', 'Rapid', 'Faster top speed and less stamina lost when sprinting', (a) => a.PAC, 87, 94],
+    ['quickstep', 'Quick Step', 'Explosive acceleration', (a) => Math.min(a.PAC, a.DRI + 3), 84, 91],
+    ['technical', 'Technical', 'Keeps the ball close while sprinting and pulls off skill moves', (a) => a.DRI, 85, 92],
+    ['pressproven', 'Press Proven', 'Hard to knock off the ball', (a) => (a.DRI + a.PHY) / 2, 81, 88],
+    ['finesse', 'Finesse Shot', 'Curled finesse shots (F) are more accurate', (a) => a.SHO + (a.DRI - 80) * 0.3, 85, 92],
+    ['powershot', 'Power Shot', 'Shots fly faster', (a) => (a.SHO * 2 + a.PHY) / 3, 83, 90],
+    ['incisive', 'Incisive Pass', 'Accurate through balls', (a) => a.PAS + (a.DRI - 80) * 0.2, 85, 92],
+    ['tikitaka', 'Tiki Taka', 'Quick, accurate short passes', (a) => a.PAS, 84, 91],
+    ['longball', 'Long Ball Pass', 'Accurate lofted passes and crosses', (a) => a.PAS + (a.PHY - 75) * 0.2, 83, 90],
+    ['intercept', 'Intercept', 'Reads and cuts out passes', (a) => a.DEF + (a.PAC - 70) * 0.1, 84, 91],
+    ['anticipate', 'Anticipate', 'Standing tackles win the ball cleanly', (a) => a.DEF, 86, 92],
+    ['slidetackle', 'Slide Tackle', 'Fewer fouls when sliding in', (a) => (a.DEF * 2 + a.PHY) / 3, 83, 90],
+    ['bruiser', 'Bruiser', 'Wins physical duels', (a) => a.PHY, 85, 91],
+    ['relentless', 'Relentless', 'Stamina lasts longer', (a) => (a.PHY + a.PAC) / 2, 83, 90],
+    ['farreach', 'Far Reach', 'Reaches shots aimed at the corners', (a) => a.DIV, 85, 90, true],
+    ['footwork', 'Footwork', 'Sharper reflex saves', (a) => a.REF, 86, 91, true],
+  ];
+  function playStyles(p) {
+    const a = Object.fromEntries(attrKeys(p).map((k) => [k, attr(p, k)]));
+    const gk = p.pos === 'GK';
+    const list = [];
+    for (const [id, label, desc, f, t, tp, forGk] of PLAYSTYLES) {
+      if (!!forGk !== gk) continue;
+      const v = f(a);
+      if (v >= t) list.push({ id, label, desc, plus: v >= tp, m: v - t + (v >= tp ? 10 : 0) });
+    }
+    list.sort((x, y) => y.m - x.m);
+    let plus = 0;
+    return list.slice(0, 6).map((x) => ({ ...x, plus: x.plus && ++plus <= 2 }));
+  }
+  const psChips = (p) => { const l = playStyles(p); return l.length ? `<div class="ps-list">${l.map((x) => `<span class="ps ${x.plus ? 'plus' : ''}" title="${esc(x.desc)}">${x.plus ? '◆' : '◇'} ${esc(x.label)}${x.plus ? '+' : ''}</span>`).join('')}</div>` : '<p class="muted small">No PlayStyles yet.</p>'; };
   const TRAIN_INT = { light: ['Light', 0.55, 0], normal: ['Normal', 1, 0.0015], intense: ['Intense', 1.6, 0.006] };
   const trainAgeF = (a) => (a <= 20 ? 1.6 : a <= 23 ? 1.25 : a <= 26 ? 1 : a <= 29 ? 0.7 : a <= 32 ? 0.45 : 0.3);
   // Can this player retrain to `pos`? Keepers and outfielders cannot swap.
@@ -1728,7 +1763,8 @@
     const lp = S.leagues[c.leagueId].clubIds.flatMap((id) => S.clubs[id]?.pids || []).map((pid) => S.players[pid]);
     const top = lp.filter((p) => p.cg[lc]).sort((a, b) => b.cg[lc][1] - a.cg[lc][1] || b.cg[lc][2] - a.cg[lc][2])[0];
     const bestP = lp.filter((p) => p.st.apps >= 15).sort((a, b) => avgRating(b) - avgRating(a))[0];
-    s.topScorer = top ? { name: top.name, club: clubName(top.clubId), goals: top.cg[lc][1] } : null;
+    s.topScorer = top ? { pid: top.id, name: top.name, club: clubName(top.clubId), goals: top.cg[lc][1] } : null;
+    s.ballon = ballonDor(s);
     s.bestPlayer = bestP ? { name: bestP.name, club: clubName(bestP.clubId), avg: avgRating(bestP).toFixed(2) } : null;
     s.income = c.income || 0;
     if (c.mode === 'player') { const p = me(); s.me = { apps: p.st.apps, g: p.st.goals, a: p.st.assists, avg: p.st.apps ? avgRating(p).toFixed(2) : '-', ovr0: p.ovr0, ovr: p.ovr, motm: p.st.motm }; }
@@ -1747,10 +1783,74 @@
     }
     c.nextQual = qualify(orders, cupWinners);
     s.nextEuro = EURO_ORDER.find((k) => c.nextQual[k].includes(uid)) || null;
+    // Individual awards for your player (player career).
+    if (c.mode === 'player') {
+      if (s.ballon[0]?.pid === c.pid) s.trophies.push("Ballon d'Or");
+      if (s.topScorer?.pid === c.pid) s.trophies.push(`${S.leagues[c.leagueId].name} Golden Boot`);
+    }
     for (const t of s.trophies) c.trophies.push({ season: c.season, name: t });
     c.summary = s;
+    if (s.ballon[0]) news(`🏆 Ballon d'Or ${c.season + 1}: ${s.ballon[0].name} (${s.ballon[0].club}). ${s.ballon.slice(1).map((b, i) => `${i + 2}. ${b.name}`).join(', ')}.`, s.ballon[0].pid === c.pid ? 'good' : 'info');
+    if (s.topScorer) news(`👟 ${S.leagues[c.leagueId].name} Golden Boot: ${s.topScorer.name} (${s.topScorer.club}) with ${s.topScorer.goals} goals.`, s.topScorer.pid === c.pid ? 'good' : 'info');
+    c.celebrate = celebrationsFor(s);
+    c.lastCelebrate = c.celebrate.slice();
     c.history.push({ season: c.season, club: clubName(uid), league: S.leagues[c.leagueId].name, pos: s.pos, pts: table[s.pos - 1]?.pts ?? 0, champion: clubName(table[0].id), trophies: s.trophies.slice(), topScorer: s.topScorer ? `${s.topScorer.name} (${s.topScorer.goals})` : '-', me: s.me || null });
     news(`Season ${seasonLabel(c.season)} complete: you finished ${ordinal(s.pos)}${s.trophies.length ? ` and won ${s.trophies.join(', ')}` : ''}.`, s.trophies.length ? 'good' : 'info');
+  }
+
+  // Ballon d'Or: form, goals, assists, ratings and trophies won this season (top-flight players).
+  function ballonDor(s) {
+    const c = C();
+    const champs = new Set(s.leagues.filter((l) => (S.leagues[l.lid]?.tier || 1) === 1).map((l) => l.champion));
+    const ucl = c.comps.UCL?.winner, uel = c.comps.UEL?.winner;
+    const tournWinners = Object.values(c.comps).filter((t) => t.type === 'tourn' && t.winner).map((t) => ({ id: t.id, nat: S.clubs[t.winner]?.nation, big: /World Cup|EURO|Copa/i.test(t.name) }));
+    const pool = Object.values(S.players).filter((p) => p.st.apps >= 18 && S.clubs[p.clubId] && (S.leagues[S.clubs[p.clubId].leagueId]?.tier || 1) === 1);
+    const scored = pool.map((p) => {
+      const line = LINE[p.pos];
+      let sc = p.ovr * 0.7 + p.st.goals * (line === 'ATT' ? 1.0 : 1.3) + p.st.assists * 0.6 + (avgRating(p) - 6.6) * 14 + p.st.motm * 0.8;
+      if (line === 'DEF') sc += 6; if (line === 'GK') sc += 4 + p.st.cs * 0.4;
+      if (champs.has(p.clubId)) sc += 7 + (LEAGUE_PRESTIGE[S.clubs[p.clubId].leagueId] ?? 0);
+      if (p.clubId === ucl) sc += 12; else if (p.clubId === uel) sc += 3;
+      for (const t of tournWinners) if (t.nat === p.nat && p.cg[t.id]) sc += t.big ? 14 : 6;
+      return { p, sc };
+    }).sort((a, b) => b.sc - a.sc).slice(0, 3);
+    return scored.map(({ p }) => ({ pid: p.id, name: p.name, club: clubName(p.clubId), goals: p.st.goals, assists: p.st.assists }));
+  }
+  // Cutscenes to play for this season: your league title, the Champions League, and awards for you / your players.
+  function celebrationsFor(s) {
+    const c = C(), uid = c.clubId, L = S.leagues[c.leagueId], out = [];
+    const mineAward = (pid) => pid && (pid === c.pid || (!isPlayerMode() && S.players[pid]?.clubId === uid));
+    if (s.leagues.some((l) => l.lid === c.leagueId && l.champion === uid)) out.push({ kind: 'league', clubId: uid, kicker: `${L.name} ${seasonLabel(c.season)}`, title: 'CHAMPIONS!', sub: clubName(uid) });
+    if (c.comps.UCL?.winner === uid) out.push({ kind: 'ucl', clubId: uid, kicker: `UEFA Champions League ${seasonLabel(c.season)}`, title: 'KINGS OF EUROPE!', sub: clubName(uid) });
+    const b = s.ballon[0];
+    if (b && mineAward(b.pid)) out.push({ kind: 'ballon', pid: b.pid, kicker: `Ballon d'Or ${c.season + 1}`, title: b.name, sub: `${b.club} · ${b.goals} goals, ${b.assists} assists` });
+    if (s.topScorer && mineAward(s.topScorer.pid)) out.push({ kind: 'boot', pid: s.topScorer.pid, kicker: `${L.name} Golden Boot`, title: s.topScorer.name, sub: `${s.topScorer.goals} league goals · ${s.topScorer.club}` });
+    return out;
+  }
+  function playCelebrations() {
+    const c = C();
+    if (!c || !c.celebrate || !c.celebrate.length || ui.celebrating || !window.SM3D || !window.SM3D.celebrate) return;
+    const cl = c.celebrate[0];
+    const cfg = { kind: cl.kind, kicker: cl.kicker, title: cl.title, sub: cl.sub };
+    if (cl.clubId) {
+      const club = S.clubs[cl.clubId];
+      const f = club.formation || pickFormation(club);
+      const ids = bestXI(club.pids, f, { ignoreAvail: true }).filter(Boolean);
+      if (c.pid && club.pids.includes(c.pid) && !ids.includes(c.pid)) ids[ids.length - 1] = c.pid;
+      cfg.hue = clubHue(club);
+      cfg.players = ids.map((id, i) => ({ pid: id, name: S.players[id].name, num: i + 1, isGK: S.players[id].pos === 'GK' }));
+      // The captain (your player in a player career) lifts the trophy.
+      const capId = c.pid && ids.includes(c.pid) ? c.pid : ids.slice().sort((a, b) => S.players[b].ovr - S.players[a].ovr)[0];
+      cfg.players.sort((a, b) => (b.pid === capId) - (a.pid === capId));
+    } else {
+      const p = S.players[cl.pid];
+      cfg.hue = clubHue(S.clubs[p.clubId] || S.clubs[c.clubId]);
+      cfg.star = { pid: p.id, name: p.name, num: 10 };
+    }
+    ui.celebrating = true;
+    cfg.onDone = () => { ui.celebrating = false; c.celebrate.shift(); save(); if (c.celebrate.length) playCelebrations(); else render(); };
+    cfg.onSkipAll = () => { ui.celebrating = false; c.celebrate = []; save(); render(); };
+    window.SM3D.celebrate(cfg);
   }
 
   function startNextSeason() {
@@ -2986,6 +3086,7 @@
       <nav class="tabs">${(pm ? TABS_PLAYER : TABS).map(([id, label]) => `<button class="tab ${view === id ? 'active' : ''}" data-act="tab" data-id="${id}">${label}${id === 'home' && c.offers.length ? `<span class="dot">${c.offers.length}</span>` : ''}</button>`).join('')}</nav>
       <main id="view" class="view">${renderView()}</main>`;
     if (view === 'match' && ui.playback) mountPlayback();
+    if (c.celebrate && c.celebrate.length && !ui.playback && !ui.celebrating) setTimeout(playCelebrations, 350);
   }
   function renderView() {
     switch (view) {
@@ -3124,6 +3225,7 @@
         <h4>League champions & cup winners</h4>
         <div class="stats-row">${s.leagues.map((l) => win(S.leagues[l.lid].name, l.champion, (s.cups.find((x) => x.lid === l.lid) ? `${s.cups.find((x) => x.lid === l.lid).name}: ${clubName(s.cups.find((x) => x.lid === l.lid).winner)}` : ''))).join('')}</div>
         <div class="stats-row">
+          ${(s.ballon || []).length ? `<div class="big-stat"><span>Ballon d'Or ${c.season + 1}</span><strong>🏆 ${esc(s.ballon[0].name)}</strong><small>${esc(s.ballon[0].club)} · 2. ${esc(s.ballon[1]?.name || '—')} · 3. ${esc(s.ballon[2]?.name || '—')}</small></div>` : ''}
           ${s.topScorer ? `<div class="big-stat"><span>Golden Boot</span><strong>${esc(s.topScorer.name)}</strong><small>${esc(s.topScorer.club)} · ${s.topScorer.goals} league goals</small></div>` : ''}
           ${s.bestPlayer ? `<div class="big-stat"><span>Player of the season</span><strong>${esc(s.bestPlayer.name)}</strong><small>${esc(s.bestPlayer.club)} · ${s.bestPlayer.avg} avg</small></div>` : ''}
         </div>
@@ -3132,6 +3234,7 @@
           ${s.table.map((r, i) => `<tr class="${r.id === c.clubId ? 'me' : ''}"><td>${i + 1}</td><td class="left">${esc(clubName(r.id))}</td><td>${r.gd}</td><td><strong>${r.pts}</strong></td></tr>`).join('')}
         </tbody></table></div>
         <p class="muted">The summer transfer window is open, so you can ${isPlayerMode() ? 'look for a new club' : 'buy and sell'} before the new season. Starting the next season ages every player by a year and applies summer development. Some veterans retire, two academy graduates join, and European places go to this season's top finishers and cup winners.</p>
+        ${(c.lastCelebrate || []).length ? `<div class="row gap mt"><button class="btn play3d" data-act="replay-celebrations">🎬 Watch the celebrations again</button></div>` : ''}
         <div class="row gap wrap"><button class="btn primary big" data-act="next-season">Start ${seasonLabel(c.season + 1)} season →</button><button class="btn" data-act="tab" data-id="${isPlayerMode() ? 'career' : 'transfers'}">${isPlayerMode() ? 'My career & transfers' : 'Transfer market'}</button></div>
       </section>`;
   }
@@ -4297,6 +4400,8 @@
         ${inCareer ? `<div class="xp"><span class="muted small">Progress to next OVR change</span><div class="xpbar"><i class="${(p.xp || 0) < 0 ? 'neg' : ''}" style="width:${clamp(Math.abs(p.xp || 0) / 8, 0, 1) * 100}%"></i></div></div>` : ''}
         <h4>Attributes</h4>
         ${attrChips(p)}
+        <h4>PlayStyles</h4>
+        ${psChips(p)}
         ${p.alt && p.alt.length ? `<p class="small">Also plays: ${p.alt.map((x) => posBadge(x)).join(' ')}</p>` : ''}
         ${inCareer && (mine && !isPlayerMode() || p.id === C().pid) ? `<div class="row gap wrap mt"><span class="muted small">Training</span> ${trainControls(p)}</div><div class="mt">${trainProgress(p)}</div>` : ''}
         <h4>Career</h4>
@@ -4410,10 +4515,11 @@
     },
     simulate: () => doSimulate(),
     play3d: () => play3d(),
+    'replay-celebrations': () => { const c = C(); c.celebrate = (c.lastCelebrate || []).slice(); playCelebrations(); },
     'skip-playback': () => finishPlayback(),
     'end-playback': () => { clearTimers(); ui.playback = null; go('home'); },
     'end-playback-next': () => { clearTimers(); ui.playback = null; go('match'); },
-    'next-season': () => { startNextSeason(); ui.fixDay = null; go('home'); },
+    'next-season': () => { const c = C(); c.celebrate = []; c.lastCelebrate = []; startNextSeason(); ui.fixDay = null; go('home'); },
     slot: (id) => {
       const i = +id;
       if (ui.squadSel === null) ui.squadSel = i;
