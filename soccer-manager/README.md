@@ -16,6 +16,14 @@ python3 -m http.server 8000   # then visit http://localhost:8000/soccer-manager/
 ## Live 2D match view
 Every match you watch shows a pitch with 22 dots and the ball, driven minute by minute by the match engine. You can see which team has the ball, attacks, shots, saves, corners, cards and goals, in sync with the text commentary. In player career your dot is ringed and labelled YOU.
 
+## Play the match yourself (3D)
+On the Match tab, **🎮 Play Match (3D)** puts you on the pitch in a real-time 3D match (three.js, loaded on demand) instead of simulating it. The score, scorers and assists you play become the official result.
+- **Controls:** WASD / arrows move, **Shift** sprint, **Space** hold to charge a shot and release to shoot (W/S aims far/near post) or tackle without the ball, **E** pass, **Q** through ball (or switch player when defending), **R** lob / cross, **Esc** pause.
+- **Manager career:** you control the whole team and switch players. **Player career:** you control only yourself, and **E** calls for the ball.
+- Player ratings and attributes drive the game: pace sets speed, shooting sets accuracy, passing sets pass error, defending wins tackles, and keeper ratings decide saves. Out-of-position players are weaker.
+- Throw-ins, corners, goal kicks, half-time, a broadcast camera, a radar minimap, and penalties for level knockout ties.
+- Match length is 3, 5, 8 or 12 real minutes. You can end a match early and keep the current score.
+
 ## Features
 - **14 leagues in 7 countries:** Premier League, LaLiga, Serie A, Bundesliga, Ligue 1, Liga Portugal and Eredivisie, with real 2025/26 squads, plus their second divisions: Championship (24 clubs, with midweek rounds), LaLiga Hypermotion, Serie B, 2. Bundesliga, Ligue 2, Liga Portugal 2 and Eerste Divisie. Second-division clubs are real, but their squads are generated.
 - **Promotion & relegation:** the bottom 3 of each top division swap places with the top 3 of the division below every season. Reserve sides (B / Jong) can't be promoted.
@@ -57,6 +65,7 @@ Every match you watch shows a pitch with 22 dots and the ball, driven minute by 
 
 ## Files
 - `data.js`: leagues, clubs and players (`Name,POS,OVR,AGE`), plus name pools for generated players.
+- `play3d.js`: the playable 3D match (three.js from cdnjs).
 - `game.js`: world builder, match engine, season logic, transfers, import/export and UI.
 - `style.css`: styling (responsive down to phone width).
 

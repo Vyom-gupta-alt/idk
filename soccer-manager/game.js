@@ -1330,6 +1330,81 @@
     }
   }
 
+  /* --- Playable 3D match: the result you play replaces the simulated one --- */
+  let forced3d = null;
+  function applyPlayed(r, f, opts) {
+    r.score = f.score.slice();
+    r.goals = f.goals.map((g) => ({ lbl: String(g.min), side: g.side, pid: g.pid, apid: g.apid, pen: false, og: g.og }));
+    for (const [pid, x] of Object.entries(r.pm)) {
+      if (x.on) { delete r.pm[pid]; continue; } // no substitutions in a played match
+      x.g = 0; x.a = 0; x.yc = 0; x.rc = 0; x.saves = 0;
+    }
+    for (const g of r.goals) { if (g.pid && r.pm[g.pid]) r.pm[g.pid].g++; if (g.apid && r.pm[g.apid]) r.pm[g.apid].a++; }
+    const res = r.score[0] > r.score[1] ? [1, -1] : r.score[0] < r.score[1] ? [-1, 1] : [0, 0];
+    let best = -1;
+    for (const [pid, x] of Object.entries(r.pm)) {
+      const p = S.players[pid], conc = r.score[1 - x.side], line = LINE[x.slot];
+      let rt = 6.3 + (p.ovr - 75) * 0.03 + (rand() - 0.5) * 0.6 + x.g * 1.0 + x.a * 0.6 + res[x.side] * 0.35;
+      if (line === 'GK') rt += (conc === 0 ? 0.7 : 0) - conc * 0.25;
+      else if (line === 'DEF') rt += (conc === 0 ? 0.5 : 0) - conc * 0.18;
+      x.rating = clamp(Math.round(rt * 10) / 10, 3, 10);
+      if (x.rating > best) { best = x.rating; r.motm = pid; }
+    }
+    r.st = f.st; r.text = f.text; r.tl = null; r.et = false; r.pens = f.pens || null;
+    if (opts.ko) {
+      const tot = [r.score[0] + (opts.agg ? opts.agg[0] : 0), r.score[1] + (opts.agg ? opts.agg[1] : 0)];
+      r.w = r.pens ? (r.pens[0] > r.pens[1] ? 0 : 1) : tot[0] > tot[1] ? 0 : 1;
+    } else r.w = null;
+    r.played3d = true;
+  }
+  const clubHue = (club) => club.hue ?? [...club.id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 360, 7);
+  function side3d(side) {
+    const slots = FORMATIONS[side.formation];
+    return {
+      name: side.name, short: side.short, hue: clubHue(S.clubs[side.clubId]),
+      players: side.xi.map((x) => {
+        const p = S.players[x.pid], f = slots[x.si] || [x.slot, 50, 50];
+        const adj = eff(p, x.slot) - p.ovr - clamp(p.form || 0, -2, 2); // out-of-position penalty
+        const a = (k) => clamp(attr(p, k) + adj, 20, 99);
+        const gk = p.pos === 'GK';
+        return {
+          pid: p.id, name: p.name, slot: x.slot, fx: (100 - f[2]) / 100, fz: (f[1] - 50) / 50, ovr: p.ovr,
+          pac: gk ? a('SPD') : a('PAC'), sho: gk ? 35 : a('SHO'), pas: gk ? a('KIC') : a('PAS'), dri: gk ? 40 : a('DRI'), def: gk ? 45 : a('DEF'), phy: gk ? 60 : a('PHY'),
+          gk: x.slot === 'GK' ? (gk ? Math.round((attr(p, 'DIV') + attr(p, 'REF') + attr(p, 'HAN') + attr(p, 'POS')) / 4) : 35) : 30,
+        };
+      }),
+    };
+  }
+  function play3d() {
+    if (!window.SM3D) return toast('The 3D match engine is not loaded.', 'bad');
+    const key = ui.previewKey;
+    const nm = advanceToUserMatch();
+    save();
+    if (!nm) return render();
+    if (nm.key !== key) { toast('A new draw was made. You have a new next fixture.', 'info'); return render(); }
+    const c = C(), uid = c.clubId;
+    const H = buildSide(nm.m.h, nm.m.h === uid), A = buildSide(nm.m.a, nm.m.a === uid);
+    const userSide = nm.m.h === uid ? 0 : 1;
+    if (isPlayerMode() && ![H, A][userSide].xi.some((x) => x.pid === c.pid)) { render(); return toast('You are not in the starting XI for this match, so it can only be simulated.', 'bad'); }
+    const opts = { ko: !!(nm.rd.single || nm.rd.leg === 2 || nm.rd.final), agg: null };
+    if (nm.rd.leg === 2) { const l1 = nm.comp.rounds.find((r) => r.stage === nm.rd.stage && r.leg === 1)?.matches[nm.mi]; if (l1 && l1.played) opts.agg = [l1.ag, l1.hg]; }
+    window.SM3D.start({
+      teams: [side3d(H), side3d(A)], userSide, controlPid: isPlayerMode() ? c.pid : null,
+      minutes: +(c.len3d || 5), ko: opts.ko, agg: opts.agg, compName: `${nm.comp.name} · ${nm.rd.name}`,
+      onAbort: () => render(),
+      onDone: (result) => {
+        forced3d = result;
+        let res;
+        try { res = playDay(true); } finally { forced3d = null; }
+        save();
+        if (!res) return render();
+        ui.playback = { res, shown: 0, tick: 0, lbl: '0', done: false };
+        render();
+        finishPlayback();
+      },
+    });
+  }
+
   /* --- Attributes & training --- */
   const ATTRS = ['PAC', 'SHO', 'PAS', 'DRI', 'DEF', 'PHY'];
   const GK_ATTRS = ['DIV', 'HAN', 'KIC', 'REF', 'SPD', 'POS'];
@@ -1425,6 +1500,7 @@
       if (m1 && m1.played) opts.agg = [m1.ag, m1.hg];
     }
     const r = simulateMatch(H, A, isUser && withText, opts);
+    if (isUser && forced3d) applyPlayed(r, forced3d, opts);
     m.played = true; m.hg = r.score[0]; m.ag = r.score[1];
     if (r.et) m.et = 1;
     if (r.pens) m.pens = r.pens;
@@ -3134,7 +3210,10 @@
           </label>
           ${pm ? '' : '<button class="btn ghost" data-act="tab" data-id="squad">Edit lineup</button>'}
         </div>
-        <div class="center"><button class="btn primary huge" data-act="simulate">▶ Simulate Match</button></div>
+        <div class="center play-row"><button class="btn primary huge" data-act="simulate">▶ Simulate Match</button>
+          <button class="btn huge play3d" data-act="play3d" title="Play the match yourself in 3D (keyboard)">🎮 Play Match (3D)</button>
+          <label class="inline small">Match length <select class="input sm" id="len3d" data-change="len3d">${[3, 5, 8, 12].map((n) => `<option value="${n}" ${+(c.len3d || 5) === n ? 'selected' : ''}>${n} min</option>`).join('')}</select></label></div>
+        <p class="center muted small">Play Match puts you on the pitch: <b>WASD</b> move, <b>Shift</b> sprint, <b>Space</b> shoot / tackle, <b>E</b> pass, <b>Q</b> through ball${pm ? '' : ' / switch player'}, <b>R</b> lob / cross. The score you play counts. Needs a keyboard.</p>
         <div class="grid g2">
           <div><h4>${esc(H.name)} XI</h4>${lineupList(H)}</div>
           <div><h4>${esc(A.name)} XI</h4>${lineupList(A)}</div>
@@ -3326,7 +3405,7 @@
     const minute = pb.done ? 'FT' : pb.lbl || '0';
     const total = (r.tl || []).length || 1;
     const myName = c.pid ? S.players[c.pid]?.name : null;
-    const scorers = (side) => r.goals.filter((g) => g[1] === side && (pb.done || events.some((e) => e.type === 'goal' && e.lbl === g[0] && e.side === side))).map((g) => `${esc(S.players[g[2]]?.name.split(' ').slice(-1)[0] ?? '')} ${esc(g[0])}'${g[4] ? ' (P)' : ''}`).join(', ');
+    const scorers = (side) => r.goals.filter((g) => g[1] === side && (pb.done || events.some((e) => e.type === 'goal' && e.lbl === g[0] && e.side === side))).map((g) => `${esc(S.players[g[2]]?.name.split(' ').slice(-1)[0] ?? 'OG')} ${esc(g[0])}'${g[4] ? ' (P)' : ''}`).join(', ');
     $('#pb-score').textContent = `${sc[0]} - ${sc[1]}`;
     $('#pb-clock').textContent = /\d/.test(minute) ? `${minute}'` : minute;
     $('#pb-clock').classList.toggle('live', !pb.done);
@@ -3843,7 +3922,7 @@
   function matchReport(cid, ri, mi) {
     const comp = C().comps[cid], rd = comp.rounds[ri], m = rd.matches[mi];
     const H = S.clubs[m.h], A = S.clubs[m.a];
-    const goals = (m.goals || []).map((g) => `<li class="${g[1] ? 'right' : ''}"><strong>${esc(g[0])}'</strong> ⚽ ${esc(S.players[g[2]]?.name ?? 'Unknown')}${g[4] ? ' (pen)' : ''}${g[3] ? ` <span class="muted small">assist ${esc(S.players[g[3]]?.name ?? '')}</span>` : ''}</li>`).join('');
+    const goals = (m.goals || []).map((g) => `<li class="${g[1] ? 'right' : ''}"><strong>${esc(g[0])}'</strong> ⚽ ${esc(S.players[g[2]]?.name ?? 'Own goal')}${g[4] ? ' (pen)' : ''}${g[3] ? ` <span class="muted small">assist ${esc(S.players[g[3]]?.name ?? '')}</span>` : ''}</li>`).join('');
     const s = m.st;
     const stat = (label, a, b, suf = '') => `<tr><td>${a}${suf}</td><td class="muted">${label}</td><td>${b}${suf}</td></tr>`;
     openModal(`
@@ -4330,6 +4409,7 @@
       render();
     },
     simulate: () => doSimulate(),
+    play3d: () => play3d(),
     'skip-playback': () => finishPlayback(),
     'end-playback': () => { clearTimers(); ui.playback = null; go('home'); },
     'end-playback-next': () => { clearTimers(); ui.playback = null; go('match'); },
@@ -4477,6 +4557,7 @@
     'my-role': (v) => { me().role = v; save(); render(); toast(`You now play as a ${ROLE[v].label.toLowerCase()}.`, 'good'); },
     'start-role': (v) => { ui.startRole = v; },
     'start-nat': (v) => { ui.startNat = v; },
+    len3d: (v) => { C().len3d = +v; save(); },
     'train-int': (v) => { C().trainInt = v; save(); render(); },
     'train-focus': (v, el) => {
       const p = S.players[el.dataset.pid];
