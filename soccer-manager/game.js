@@ -1594,6 +1594,7 @@
     }
     c.leagueId = S.clubs[c.clubId].leagueId;
     for (const p of Object.values(S.players)) if (p.away) p.away = null;
+    if (!isPlayerMode()) returnLoans();
     if (!isPlayerMode()) academySeasonEnd();
     // Expiring contracts: AI clubs renew or release; your players leave unless you renewed them.
     for (const p of Object.values(S.players)) {
@@ -1611,7 +1612,7 @@
       if (p.clubId === 'FA') continue;
       // Career history (kept for real players, your club and your own player).
       if (p.st.apps && (!p.gen || p.clubId === c.clubId || p.id === c.pid)) {
-        (p.hist || (p.hist = [])).push({ s: c.season, c: clubName(p.clubId), a: p.st.apps, g: p.st.goals, as: p.st.assists, r: +avgRating(p).toFixed(2), o: p.ovr });
+        (p.hist || (p.hist = [])).push({ s: c.season, c: p.loanClub ? `${p.loanClub} (loan)` : clubName(p.clubId), a: p.st.apps, g: p.st.goals, as: p.st.assists, r: +avgRating(p).toFixed(2), o: p.ovr });
       }
       const a = p.age;
       // Most development now happens match by match; this is the summer's age effect.
@@ -1622,8 +1623,8 @@
       if (p.pot < p.ovr) p.pot = p.ovr;
       p.age++;
       p.ovr0 = p.ovr; p.xp = (p.xp || 0) * 0.5;
-      p.form = 0; p.inj = 0; p.sus = 0; p.st = newStats(); p.cg = {};
-      if (p.clubId !== c.clubId && p.id !== c.pid) p.wage = wageFor(p); // your players keep the wage they signed for
+      p.form = 0; p.inj = 0; p.sus = 0; p.st = newStats(); p.cg = {}; p.loanClub = null;
+      if (p.clubId !== c.clubId && p.id !== c.pid && !p.loan) p.wage = wageFor(p); // your players keep the wage they signed for
       if (p.age >= 35 && p.id !== c.pid && rand() < 0.25 + (p.age - 35) * 0.2) retired.push(p);
     }
     for (const p of retired) {
@@ -1958,7 +1959,11 @@
     return { lvl: 0, label: 'Not interested', wm: 0 };
   }
   const wageDemand = (p, it) => niceWage(Math.max(p.wage || 0, wageFor(p)) * (it.wm || 1));
-  function wageBill() { const c = C(); return S.clubs[c.clubId].pids.reduce((s, id) => s + (S.players[id].wage || 0), 0); }
+  function wageBill() {
+    const c = C();
+    const own = S.clubs[c.clubId].pids.reduce((s, id) => s + (S.players[id].wage || 0), 0);
+    return own + (c.loans || []).reduce((s, id) => { const p = S.players[id]; return s + (p && p.loan ? Math.round((p.wage || 0) * p.loan.pct / 100) : 0); }, 0);
+  }
 
   function movePlayer(p, toClubId) {
     const from = S.clubs[p.clubId];
@@ -2114,6 +2119,84 @@
     save();
     toast(amount ? `${p.name} sold to ${buyer.name} for ${money(amount)}.` : `${p.name} released.`, 'good');
   }
+  /* --- Loans: send a player out for a season to get games; he returns in the summer --- */
+  const MAX_LOANS = 8;
+  const loanedOut = () => (C().loans || []).map((id) => S.players[id]).filter((p) => p && p.loan);
+  // Loans agreed from June onwards cover next season.
+  function loanSeason() { const c = C(); return c.seasonOver || curDate() >= `${c.season + 1}-06-01` ? c.season + 1 : c.season; }
+  function canLoan(p) {
+    if (!windowInfo().open) return 'Loans can only be agreed while a transfer window is open.';
+    if (loanedOut().length >= MAX_LOANS) return `You already have ${MAX_LOANS} players out on loan.`;
+    if (p.contract < loanSeason()) return 'His contract ends before the loan would finish. Renew it first.';
+    return canSell(p);
+  }
+  function loanOffers(p) {
+    const c = C(), val = playerValue(p);
+    const clubs = Object.values(S.clubs).filter((cl) => isClub(cl) && cl.id !== c.clubId && cl.pids.length && cl.pids.length < 30);
+    const fits = clubs.filter((cl) => { const r = clubRating(cl.id); return r >= p.ovr - 8 && r <= p.ovr + 3; });
+    const young = p.age <= 23;
+    return shuffle(fits).slice(0, 12).map((cl) => {
+      const role = roleAt(cl.id, p), starter = role.startsWith('Starter');
+      const rich = cl.budget > 30e6;
+      return {
+        clubId: cl.id, role, starter,
+        pct: clamp(Math.round((starter ? 20 : 45) + (rich ? -15 : 10) + randInt(-10, 10)) , 0, 90), // your share of his wages
+        fee: rand() < 0.4 ? niceRound(val * (0.03 + rand() * 0.07)) : 0,
+        buy: !young && rand() < 0.35 && cl.budget > val ? niceRound(val * (1.05 + rand() * 0.25)) : 0,
+      };
+    }).sort((a, b) => (b.starter - a.starter) || (clubRating(b.clubId) - clubRating(a.clubId))).slice(0, 5);
+  }
+  function loanPlayer(pid, o) {
+    const c = C(), p = S.players[pid], to = S.clubs[o.clubId];
+    const err = canLoan(p);
+    if (err) return toast(err, 'bad');
+    movePlayer(p, to.id);
+    p.loan = { from: c.clubId, pct: o.pct, season: loanSeason(), ovr: p.ovr, buy: o.buy || 0 };
+    (c.loans = c.loans || []).push(pid);
+    if (o.fee) { S.clubs[c.clubId].budget += o.fee; to.budget -= o.fee; }
+    c.offers = c.offers.filter((x) => x.pid !== pid);
+    cleanLineup();
+    c.transfers.unshift({ season: c.season, date: curDate(), pid, name: p.name, dir: 'out', club: to.name + ' (loan)', fee: o.fee || 0 });
+    news(`🔄 ${p.name} joins ${to.name} on loan until the end of the ${seasonLabel(p.loan.season)} season. You pay ${o.pct}% of his wages.`, 'transfer');
+    save();
+    toast(`${p.name} loaned to ${to.name}.`, 'good');
+  }
+  // Brings a loanee home; `sold` is the fee when the loan club takes up its option to buy.
+  function endLoan(p, sold) {
+    const c = C(), club = S.clubs[p.clubId], from = S.clubs[c.clubId];
+    const line = `${p.st.apps} apps, ${p.st.goals} goals${p.st.apps ? `, avg ${avgRating(p).toFixed(2)}` : ''}, OVR ${p.loan.ovr} → ${p.ovr}`;
+    c.loans = (c.loans || []).filter((id) => id !== p.id);
+    p.loanClub = club.name;
+    if (sold) {
+      from.budget += sold; club.budget -= sold;
+      p.contract = c.season + randInt(2, 4);
+      c.transfers.unshift({ season: c.season, date: curDate(), pid: p.id, name: p.name, dir: 'out', club: club.name, fee: sold });
+      news(`💰 ${club.name} take up their option and sign ${p.name} for ${money(sold)} (${line}).`, 'transfer');
+    } else {
+      movePlayer(p, c.clubId);
+      news(`↩️ ${p.name} returns from his loan at ${club.name}: ${line}.`, p.ovr > p.loan.ovr ? 'good' : 'info');
+    }
+    p.loan = null;
+    invalidate();
+  }
+  function recallLoan(pid) {
+    const p = S.players[pid];
+    if (!p || !p.loan) return;
+    if (!windowInfo().open) return toast('You can only recall a player while a transfer window is open.', 'bad');
+    if (S.clubs[C().clubId].pids.length >= MAX_SQUAD) return toast('Your squad is full.', 'bad');
+    endLoan(p, 0);
+    save();
+  }
+  function returnLoans() {
+    const c = C();
+    for (const p of loanedOut()) {
+      if (p.loan.season > c.season) continue;
+      const buyer = S.clubs[p.clubId];
+      const played = p.st.apps >= 10 && avgRating(p) >= 6.8;
+      endLoan(p, p.loan.buy && played && buyer.budget >= p.loan.buy && rand() < 0.65 ? p.loan.buy : 0);
+    }
+  }
+
   function maybeIncomingOffer() {
     const c = C();
     if (rand() > 0.1) return;
@@ -2189,7 +2272,7 @@
       let best = null, bs = -1e9, fee = 0;
       for (let t = 0; t < 250; t++) {
         const p = all[Math.floor(rand() * all.length)];
-        if (!p || !S.players[p.id] || p.clubId === buyer.id || (isPlayerMode() ? p.id === c.pid : p.clubId === c.clubId) || (p.clubId !== 'FA' && !isClub(S.clubs[p.clubId]))) continue;
+        if (!p || !S.players[p.id] || p.loan || p.clubId === buyer.id || (isPlayerMode() ? p.id === c.pid : p.clubId === c.clubId) || (p.clubId !== 'FA' && !isClub(S.clubs[p.clubId]))) continue;
         if (fit(p.pos, pos) < -1 || p.ovr < we + 2 || p.ovr > we + 12 || p.age > 31) continue;
         if (p.clubId !== 'FA' && (prestige(p.clubId) > bp + 2 || isUntouchable(p))) continue;
         const f = p.clubId === 'FA' ? niceRound(playerValue(p) * 0.3) : niceRound(clubValuation(p, buyer.id) * (0.95 + rand() * 0.15));
@@ -2206,7 +2289,7 @@
       best.contract = c.season + randInt(2, 5);
       // Keep squads a sensible size: the weakest surplus player is released.
       if (buyer.pids.length > 28) {
-        const cut = buyer.pids.map((id) => S.players[id]).sort((a, b) => a.ovr - b.ovr)[0];
+        const cut = buyer.pids.map((id) => S.players[id]).filter((x) => !x.loan).sort((a, b) => a.ovr - b.ovr)[0];
         if (cut && cut.id !== best.id) movePlayer(cut, 'FA');
       }
       const item = { date: curDate(), pid: best.id, name: best.name, pos: best.pos, ovr: best.ovr, from: from.name, to: buyer.name, fee };
@@ -3415,7 +3498,7 @@
             <td>${formArrow(p.form)}</td><td>${p.st.apps}</td><td>${p.st.goals}</td><td>${p.st.assists}</td><td>${p.st.apps ? avgRating(p).toFixed(2) : '-'}</td>
             <td class="money">${money(playerValue(p))}</td><td class="money muted">${money(p.wage)}</td>
             <td class="${expiring(p) ? 'warn-t' : 'muted'} small">${contractLabel(p)}</td>
-            <td class="nowrap"><button class="btn xs ghost" data-act="renew" data-id="${p.id}">Contract</button> <button class="btn xs ghost" data-act="sell" data-id="${p.id}">Sell</button></td>
+            <td class="nowrap"><button class="btn xs ghost" data-act="renew" data-id="${p.id}">Contract</button> <button class="btn xs ghost" data-act="loan" data-id="${p.id}">Loan</button> <button class="btn xs ghost" data-act="sell" data-id="${p.id}">Sell</button></td>
           </tr>`).join('')}
           </tbody></table></div>
         </section>
@@ -3443,7 +3526,7 @@
   function viewTransfers() {
     const c = C(), me = S.clubs[c.clubId], f = ui.market, win = windowInfo();
     const q = norm(f.q);
-    let list = Object.values(S.players).filter((p) => p.clubId !== c.clubId && (p.clubId === 'FA' || isClub(S.clubs[p.clubId])));
+    let list = Object.values(S.players).filter((p) => p.clubId !== c.clubId && !p.loan && (p.clubId === 'FA' || isClub(S.clubs[p.clubId])));
     if (f.league === 'FA') list = list.filter((p) => p.clubId === 'FA');
     else if (f.league !== 'ALL') list = list.filter((p) => S.clubs[p.clubId].leagueId === f.league);
     if (f.pos !== 'ALL') list = list.filter((p) => (['DEF', 'MID', 'ATT'].includes(f.pos) ? LINE[p.pos] === f.pos : p.pos === f.pos));
@@ -3484,6 +3567,7 @@
         </tbody></table></div>
         ${total > rows.length ? `<div class="center"><button class="btn" data-act="m-more">Show more (${total - rows.length} remaining)</button></div>` : ''}
       </section>
+      ${loansHtml()}
       <div class="grid g2">
         <section class="card"><h3>Transfer news</h3>${c.tnews.length ? `<ul class="plist">${c.tnews.slice(0, 25).map((t) => `<li><span class="muted small">${fmtDate(t.date)}</span> <span>${esc(t.name)} <span class="muted small">${t.pos} · ${t.ovr}</span><br><span class="small">${esc(t.from)} → <strong>${esc(t.to)}</strong></span></span><span class="ml-auto money">${t.fee ? money(t.fee) : 'Free'}</span></li>`).join('')}</ul>` : '<p class="muted">No deals yet. Clubs trade during the summer and January windows.</p>'}</section>
         <section class="card"><h3>Your transfer history</h3>${c.transfers.length ? `<ul class="plist">${c.transfers.slice(0, 25).map((t) => `<li><span class="tag ${t.dir === 'in' ? 'good' : 'warn'}">${t.dir === 'in' ? 'IN' : 'OUT'}</span> ${esc(t.name)} <span class="muted small">${t.dir === 'in' ? 'from' : 'to'} ${esc(t.club)} · ${seasonLabel(t.season)}</span><span class="ml-auto money">${money(t.fee)}</span></li>`).join('')}</ul>` : '<p class="muted">You have not made any transfers yet.</p>'}</section>
@@ -3984,7 +4068,8 @@
           <label class="inline">Position <select class="input sm" id="edit-pos">${POSITIONS.map((x) => `<option ${x === p.pos ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
           <button class="btn sm" data-act="save-player" data-id="${p.id}">Save</button></div>
         <div class="row gap mt">
-          ${inCareer && mine && !isPlayerMode() ? `<button class="btn" data-act="sell" data-id="${p.id}">Sell / release</button>` : ''}
+          ${inCareer && mine && !isPlayerMode() ? `<button class="btn" data-act="loan" data-id="${p.id}">Loan out</button> <button class="btn" data-act="sell" data-id="${p.id}">Sell / release</button>` : ''}
+          ${inCareer && p.loan && p.loan.from === C().clubId ? `<button class="btn" data-act="recall" data-id="${p.id}">Recall from loan</button>` : ''}
           ${inCareer && !mine && !isPlayerMode() ? `<button class="btn primary" data-act="buy" data-id="${p.id}">${p.clubId === 'FA' ? 'Sign' : 'Make an offer'}</button>` : ''}
         </div>
       </div>`);
@@ -4001,6 +4086,38 @@
       <p class="muted">${posBadge(p.pos)} ${ovrBadge(p.ovr)} · Age ${p.age} · Market value <strong class="money">${money(playerValue(p))}</strong> · Wage ${money(p.wage)}/wk</p>
       ${!win.open ? `<div class="notice">${esc(win.label)}. You can only release players until the window opens.</div>` : offers.length ? `<ul class="offer-list">${offers.map((o, i) => `<li>${crest(S.clubs[o.clubId])} <strong>${esc(clubName(o.clubId))}</strong> <span class="muted small">${esc(S.leagues[S.clubs[o.clubId].leagueId]?.name || '')}</span><span class="ml-auto money"><strong>${money(o.amount)}</strong></span><button class="btn primary sm" data-act="accept-sale" data-id="${i}">Accept</button></li>`).join('')}</ul>` : '<p>No club can afford him right now.</p>'}
       <div class="row gap mt">${win.open ? `<button class="btn ghost sm" data-act="refresh-offers" data-id="${pid}">Ask around again</button>` : ''}<button class="btn ghost danger sm" data-act="release" data-id="${pid}">Release for free</button></div>`);
+  }
+
+  function loanModal(pid) {
+    const p = S.players[pid];
+    const err = canLoan(p);
+    if (err) return toast(err, 'bad');
+    const offers = loanOffers(p);
+    ui.loanOffers = { pid, offers };
+    openModal(`
+      <h2>Loan out ${esc(p.name)}</h2>
+      <p class="muted">${posBadge(p.pos)} ${ovrBadge(p.ovr)} · Age ${p.age} · Wage ${money(p.wage)}/wk · Loan until the end of ${seasonLabel(loanSeason())}</p>
+      <p class="small muted">Regular football helps players develop faster. You can recall him while a window is open, and he comes back in the summer.</p>
+      ${offers.length ? `<ul class="offer-list loan-list">${offers.map((o, i) => { const cl = S.clubs[o.clubId]; return `<li>
+        ${crest(cl)} <div class="grow"><strong>${esc(cl.name)}</strong> ${ovrBadge(clubRating(cl.id))} <span class="muted small">${esc(S.leagues[cl.leagueId]?.name || '')}</span><br>
+        <span class="small"><span class="tag ${o.starter ? 'good' : ''}">${esc(o.role)}</span> You pay <strong>${o.pct}%</strong> of wages (${money(Math.round(p.wage * o.pct / 100))}/wk)${o.fee ? ` · Loan fee <strong class="money">${money(o.fee)}</strong>` : ''}${o.buy ? ` · Option to buy <strong class="money">${money(o.buy)}</strong>` : ''}</span></div>
+        <button class="btn primary sm" data-act="accept-loan" data-id="${i}">Agree</button></li>`; }).join('')}</ul>` : '<p>No club wants him on loan right now.</p>'}
+      <div class="row gap mt"><button class="btn ghost sm" data-act="loan" data-id="${pid}">Ask around again</button></div>`);
+  }
+  function loansHtml() {
+    const list = loanedOut();
+    if (!list.length) return '';
+    return `
+      <section class="card">
+        <h3>Out on loan <span class="muted small">${list.length}/${MAX_LOANS}</span></h3>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pos</th><th class="left">Name</th><th>Age</th><th>OVR</th><th class="left">Club</th><th>Apps</th><th>G</th><th>A</th><th>Avg</th><th>Wages</th><th>Until</th><th></th></tr></thead><tbody>
+        ${list.map((p) => `<tr><td>${posBadge(p.pos)}</td><td class="left">${playerLink(p)} ${statusIcons(p)}</td><td>${p.age}</td><td>${ovrBadge(p.ovr)}${p.ovr !== p.loan.ovr ? `<span class="form ${p.ovr > p.loan.ovr ? 'up' : 'down'} small"> ${p.ovr > p.loan.ovr ? '+' : ''}${p.ovr - p.loan.ovr}</span>` : ''}</td>
+          <td class="left">${crest(S.clubs[p.clubId], 'sm')} ${esc(clubName(p.clubId))}${p.loan.buy ? ` <span class="muted small" title="Option to buy">opt. ${money(p.loan.buy)}</span>` : ''}</td>
+          <td>${p.st.apps}</td><td>${p.st.goals}</td><td>${p.st.assists}</td><td>${p.st.apps ? avgRating(p).toFixed(2) : '-'}</td>
+          <td class="money muted small">${p.loan.pct}% · ${money(Math.round(p.wage * p.loan.pct / 100))}</td><td class="muted small">${seasonLabel(p.loan.season)}</td>
+          <td><button class="btn xs ghost" data-act="recall" data-id="${p.id}">Recall</button></td></tr>`).join('')}
+        </tbody></table></div>
+      </section>`;
   }
 
   /* ------------------------------------------------------------------ *
@@ -4069,6 +4186,9 @@
     'squad-sort': (id) => { ui.squadSort = id; render(); },
     sell: (id) => sellModal(id),
     'refresh-offers': (id) => sellModal(id),
+    loan: (id) => loanModal(id),
+    'accept-loan': (i) => { const lo = ui.loanOffers; const o = lo && lo.offers[+i]; if (!o) return; loanPlayer(lo.pid, o); closeModal(); render(); },
+    recall: (id) => askConfirm(`Recall ${S.players[id].name} from his loan at ${clubName(S.players[id].clubId)}?`, () => { recallLoan(id); closeModal(); render(); }, 'Recall'),
     'accept-sale': (i) => { const so = ui.sellOffers; const o = so && so.offers[+i]; if (!o) return; sellPlayer(so.pid, o.clubId, o.amount); closeModal(); render(); },
     release: (id) => askConfirm(`Release ${S.players[id].name} for free?`, () => { sellPlayer(id, 'FA', 0); render(); }, 'Release'),
     buy: (id) => { ui.neg = null; negModal(id); },
@@ -4268,6 +4388,7 @@
     ensureNations(st);
     if (!st.clubs.YTH) st.clubs.YTH = { id: 'YTH', name: 'Youth academy', short: 'YTH', leagueId: null, pids: [], level: 50, budget: 0, youth: true };
     if (st.career && st.career.mode !== 'player' && !st.career.academy) academySetup();
+    if (st.career && !st.career.loans) st.career.loans = [];
     S = prev === st ? st : prev;
     if (st.career) S = st;
   }

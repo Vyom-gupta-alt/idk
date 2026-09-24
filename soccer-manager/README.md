@@ -32,6 +32,7 @@ Every match you watch shows a pitch with 22 dots and the ball, driven minute by 
   - Players may refuse to join clubs that are smaller, play in a weaker league or have no European football.
   - Wage demands must fit your wage budget.
   - AI clubs buy and sell among themselves, and bid for your players.
+- **Loans (manager):** use the Loan button in your squad or a player's profile to send him out for a season. Clubs that want him show his expected role, the share of his wages you still pay, and sometimes a loan fee or an option to buy. Loaned players develop from their games at the new club, are listed under Transfers → Out on loan with their stats, can be recalled while a window is open, and return in the summer unless the loan club takes up its option to buy. Loans agreed in the summer cover the next season.
 - **Tactics:** 9 formations, 4 mentalities and 7 play styles: Balanced, Tiki-taka, Gegenpress, Counter-attack, Long ball, Wing play and Park the bus. Each changes possession, attacking rate, chance quality, crossing and cards in the match engine.
 - **Player roles** for every position, e.g. Holding midfielder, Deep-lying playmaker, Box-to-box, Mezzala, Inside forward, Cross specialist, Target man, Poacher, False 9 and Wing-back. Roles change who shoots, who creates, who heads crosses in, and how much each player adds to attack, midfield or defence. Goal commentary changes with the role too.
 - **Player type (player career):** choose how you play (for example a winger who cuts in, or a cross specialist), and change it later in My Career.

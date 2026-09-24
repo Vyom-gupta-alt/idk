@@ -491,3 +491,8 @@ label.check { display: inline-flex; align-items: center; gap: .4rem; font-size: 
 .cc-form label { display: flex; flex-direction: column; gap: .3rem; font-size: .85rem; color: var(--muted); }
 .cc-form .input { width: 100%; }
 .cc-form input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
+
+/* v7: loans */
+.loan-list li { display: flex; align-items: center; gap: .6rem; padding: .55rem 0; border-bottom: 1px solid var(--line); }
+.loan-list li:last-child { border-bottom: 0; }
+.loan-list .grow { flex: 1; min-width: 0; line-height: 1.5; }
