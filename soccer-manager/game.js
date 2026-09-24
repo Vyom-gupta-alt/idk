@@ -1213,6 +1213,7 @@
     setupSeason(2025, qualify(orders, cupWinners));
     S.career.lineup = bestXI(club.pids, S.career.formation);
     if (!pid) academySetup();
+    S.career.awardsNext = realAwards2025();
     S.career.wageBudget = niceRound(wageBill() * 1.12);
     if (club.custom) news(`🏗️ ${club.name} are founded! ${club.stadium} is ready and the ${S.leagues[club.leagueId].name} awaits.`, 'good');
     if (pid) news(`✍️ ${S.career.manager} (17, ${opts.pos || 'ST'}) signs a first professional contract with ${club.name}. Play well and your OVR will rise.`, 'good');
@@ -1334,7 +1335,7 @@
   let forced3d = null;
   function applyPlayed(r, f, opts) {
     r.score = f.score.slice();
-    r.goals = f.goals.map((g) => ({ lbl: String(g.min), side: g.side, pid: g.pid, apid: g.apid, pen: false, og: g.og }));
+    r.goals = f.goals.map((g) => ({ lbl: String(g.min), side: g.side, pid: g.pid, apid: g.apid, pen: false, og: g.og, d3: true, dist: g.dist || 0, kind: g.kind || '' }));
     for (const [pid, x] of Object.entries(r.pm)) {
       if (x.on) { delete r.pm[pid]; continue; } // no substitutions in a played match
       x.g = 0; x.a = 0; x.yc = 0; x.rc = 0; x.saves = 0;
@@ -1543,6 +1544,7 @@
     if (opts.agg) m.agg = [m.hg + opts.agg[0], m.ag + opts.agg[1]];
     const detailed = comp.type !== 'league' || comp.leagueId === c.leagueId || isUser;
     if (detailed) m.goals = r.goals.map((g) => [g.lbl, g.side, g.pid, g.apid, g.pen ? 1 : 0]);
+    noteWonderGoals(r, m, comp);
     m.motm = r.motm;
     if (detailed && comp.type !== 'intl') m.st = r.st;
     const intl = comp.type === 'intl' || comp.type === 'tourn';
@@ -1680,6 +1682,7 @@
     if (windowInfo().open) { aiTransfers(randInt(1, 3)); maybeIncomingOffer(); }
     c.offers = c.offers.filter((o) => o.until > c.dayIdx && (isPlayerMode() || S.players[o.pid]?.clubId === c.clubId));
     c.dayIdx++;
+    checkGala();
     if (c.dayIdx >= c.days.length) finishSeason();
     invalidate();
     return userRes;
@@ -1764,7 +1767,8 @@
     const top = lp.filter((p) => p.cg[lc]).sort((a, b) => b.cg[lc][1] - a.cg[lc][1] || b.cg[lc][2] - a.cg[lc][2])[0];
     const bestP = lp.filter((p) => p.st.apps >= 15).sort((a, b) => avgRating(b) - avgRating(a))[0];
     s.topScorer = top ? { pid: top.id, name: top.name, club: clubName(top.clubId), goals: top.cg[lc][1] } : null;
-    s.ballon = ballonDor(s);
+    s.ballon = ballonDor(s).slice(0, 3); // shortlist preview; the winner is revealed at the gala on 26 October
+    c.awardsNext = buildAwards(s);
     s.bestPlayer = bestP ? { name: bestP.name, club: clubName(bestP.clubId), avg: avgRating(bestP).toFixed(2) } : null;
     s.income = c.income || 0;
     if (c.mode === 'player') { const p = me(); s.me = { apps: p.st.apps, g: p.st.goals, a: p.st.assists, avg: p.st.apps ? avgRating(p).toFixed(2) : '-', ovr0: p.ovr0, ovr: p.ovr, motm: p.st.motm }; }
@@ -1785,12 +1789,12 @@
     s.nextEuro = EURO_ORDER.find((k) => c.nextQual[k].includes(uid)) || null;
     // Individual awards for your player (player career).
     if (c.mode === 'player') {
-      if (s.ballon[0]?.pid === c.pid) s.trophies.push("Ballon d'Or");
       if (s.topScorer?.pid === c.pid) s.trophies.push(`${S.leagues[c.leagueId].name} Golden Boot`);
     }
     for (const t of s.trophies) c.trophies.push({ season: c.season, name: t });
     c.summary = s;
-    if (s.ballon[0]) news(`🏆 Ballon d'Or ${c.season + 1}: ${s.ballon[0].name} (${s.ballon[0].club}). ${s.ballon.slice(1).map((b, i) => `${i + 2}. ${b.name}`).join(', ')}.`, s.ballon[0].pid === c.pid ? 'good' : 'info');
+    { const A = c.awardsNext, mineN = A.ballon.nominees.filter((n) => n.pid && (n.pid === c.pid || (!isPlayerMode() && S.players[n.pid]?.clubId === uid)));
+      news(`🎟️ Ballon d'Or nominees announced: 30 players for the gala on 26 Oct ${A.year}.${mineN.length ? ` Nominated: ${mineN.map((n) => n.name).join(', ')}.` : ''} See the Awards tab.`, mineN.length ? 'good' : 'info'); }
     if (s.topScorer) news(`👟 ${S.leagues[c.leagueId].name} Golden Boot: ${s.topScorer.name} (${s.topScorer.club}) with ${s.topScorer.goals} goals.`, s.topScorer.pid === c.pid ? 'good' : 'info');
     c.celebrate = celebrationsFor(s);
     c.lastCelebrate = c.celebrate.slice();
@@ -1799,12 +1803,12 @@
   }
 
   // Ballon d'Or: form, goals, assists, ratings and trophies won this season (top-flight players).
-  function ballonDor(s) {
+  function ballonDor(s, minApps = 18) {
     const c = C();
     const champs = new Set(s.leagues.filter((l) => (S.leagues[l.lid]?.tier || 1) === 1).map((l) => l.champion));
     const ucl = c.comps.UCL?.winner, uel = c.comps.UEL?.winner;
     const tournWinners = Object.values(c.comps).filter((t) => t.type === 'tourn' && t.winner).map((t) => ({ id: t.id, nat: S.clubs[t.winner]?.nation, big: /World Cup|EURO|Copa/i.test(t.name) }));
-    const pool = Object.values(S.players).filter((p) => p.st.apps >= 18 && S.clubs[p.clubId] && (S.leagues[S.clubs[p.clubId].leagueId]?.tier || 1) === 1);
+    const pool = Object.values(S.players).filter((p) => p.st.apps >= minApps && S.clubs[p.clubId] && isClub(S.clubs[p.clubId]) && (S.leagues[S.clubs[p.clubId].leagueId]?.tier || 1) === 1);
     const scored = pool.map((p) => {
       const line = LINE[p.pos];
       let sc = p.ovr * 0.7 + p.st.goals * (line === 'ATT' ? 1.0 : 1.3) + p.st.assists * 0.6 + (avgRating(p) - 6.6) * 14 + p.st.motm * 0.8;
@@ -1813,8 +1817,8 @@
       if (p.clubId === ucl) sc += 12; else if (p.clubId === uel) sc += 3;
       for (const t of tournWinners) if (t.nat === p.nat && p.cg[t.id]) sc += t.big ? 14 : 6;
       return { p, sc };
-    }).sort((a, b) => b.sc - a.sc).slice(0, 3);
-    return scored.map(({ p }) => ({ pid: p.id, name: p.name, club: clubName(p.clubId), goals: p.st.goals, assists: p.st.assists }));
+    }).sort((a, b) => b.sc - a.sc).slice(0, 30);
+    return scored.map(({ p, sc }) => ({ pid: p.id, name: p.name, club: clubName(p.clubId), clubId: p.clubId, pos: p.pos, age: p.age, goals: p.st.goals, assists: p.st.assists, avg: +avgRating(p).toFixed(2), cs: p.st.cs, sc: +sc.toFixed(1) }));
   }
   // Cutscenes to play for this season: your league title, the Champions League, and awards for you / your players.
   function celebrationsFor(s) {
@@ -1822,8 +1826,6 @@
     const mineAward = (pid) => pid && (pid === c.pid || (!isPlayerMode() && S.players[pid]?.clubId === uid));
     if (s.leagues.some((l) => l.lid === c.leagueId && l.champion === uid)) out.push({ kind: 'league', clubId: uid, kicker: `${L.name} ${seasonLabel(c.season)}`, title: 'CHAMPIONS!', sub: clubName(uid) });
     if (c.comps.UCL?.winner === uid) out.push({ kind: 'ucl', clubId: uid, kicker: `UEFA Champions League ${seasonLabel(c.season)}`, title: 'KINGS OF EUROPE!', sub: clubName(uid) });
-    const b = s.ballon[0];
-    if (b && mineAward(b.pid)) out.push({ kind: 'ballon', pid: b.pid, kicker: `Ballon d'Or ${c.season + 1}`, title: b.name, sub: `${b.club} · ${b.goals} goals, ${b.assists} assists` });
     if (s.topScorer && mineAward(s.topScorer.pid)) out.push({ kind: 'boot', pid: s.topScorer.pid, kicker: `${L.name} Golden Boot`, title: s.topScorer.name, sub: `${s.topScorer.goals} league goals · ${s.topScorer.club}` });
     return out;
   }
@@ -1851,6 +1853,177 @@
     cfg.onDone = () => { ui.celebrating = false; c.celebrate.shift(); save(); if (c.celebrate.length) playCelebrations(); else render(); };
     cfg.onSkipAll = () => { ui.celebrating = false; c.celebrate = []; save(); render(); };
     window.SM3D.celebrate(cfg);
+  }
+
+  /* --- The awards gala (Ballon d'Or night), every 26 October --- */
+  const WONDER = ['a 35-yard rocket into the top corner', 'a bicycle kick', 'a solo run past five defenders', 'a free kick that dipped under the bar', 'a volley from the edge of the box', 'a chip from the halfway line', 'a rabona finish', 'a scorpion kick', 'a curler into the far corner', 'a first-time half-volley from 30 yards'];
+  function noteWonderGoals(r, m, comp) {
+    const c = C();
+    if (!['league', 'euro', 'cup'].includes(comp.type)) return;
+    for (const g of r.goals) {
+      const p = g.pid && S.players[g.pid];
+      if (!p || g.pen || g.og) continue;
+      let sc = 0, desc = '';
+      if (g.d3 && (g.dist >= 22 || g.kind === 'finesse')) { sc = 80 + Math.min(18, (g.dist - 18) * 1.2) + (g.kind === 'finesse' ? 4 : 0); desc = `${g.kind === 'finesse' ? 'a curled finesse shot' : 'a thunderbolt'} from ${Math.round(g.dist)} metres`; }
+      else if (!g.d3 && rand() < 0.008 + (attr(p, 'SHO') - 70) * 0.0003) { sc = 62 + rand() * 26 + (p.ovr - 70) * 0.6; desc = pick(WONDER); }
+      if (!sc) continue;
+      const opp = clubName(g.side === 0 ? m.a : m.h);
+      (c.wonder = c.wonder || []).push({ pid: p.id, name: p.name, club: clubName(p.clubId), clubId: p.clubId, desc, opp, date: curDate(), comp: comp.name, sc: +sc.toFixed(1) });
+    }
+  }
+  // All the awards for the season that just ended; presented at the gala on 26 October.
+  function buildAwards(s) {
+    const c = C(), Y = c.season + 1;
+    const ranked = ballonDor(s);
+    const top = (list, n) => list.slice(0, n);
+    const pool = Object.values(S.players).filter((p) => p.st.apps >= 15 && S.clubs[p.clubId] && isClub(S.clubs[p.clubId]) && (S.leagues[S.clubs[p.clubId].leagueId]?.tier || 1) === 1);
+    const card = (p, extra) => ({ pid: p.id, name: p.name, club: clubName(p.clubId), clubId: p.clubId, pos: p.pos, ...extra });
+    const byScore = new Map(ranked.map((x) => [x.pid, x.sc]));
+    const score = (p) => byScore.get(p.id) ?? (p.ovr * 0.7 + p.st.goals + p.st.assists * 0.6 + (avgRating(p) - 6.6) * 14);
+    const kopa = pool.filter((p) => p.age <= 21).sort((a, b) => score(b) - score(a)).slice(0, 5).map((p) => card(p, { age: p.age, goals: p.st.goals, avg: +avgRating(p).toFixed(2) }));
+    const yashin = pool.filter((p) => p.pos === 'GK').sort((a, b) => (avgRating(b) * 10 + b.st.cs * 0.8 + b.ovr * 0.3) - (avgRating(a) * 10 + a.st.cs * 0.8 + a.ovr * 0.3)).slice(0, 5).map((p) => card(p, { cs: p.st.cs, avg: +avgRating(p).toFixed(2) }));
+    const muller = pool.slice().sort((a, b) => b.st.goals - a.st.goals || b.st.assists - a.st.assists).slice(0, 5).map((p) => card(p, { goals: p.st.goals }));
+    // Coach of the year (Johan Cruyff Trophy) and Club of the Year: trophies plus over-performance.
+    const tw = (id) => (c.comps.UCL?.winner === id ? 12 : 0) + (c.comps.UEL?.winner === id ? 5 : 0) + (c.comps.UECL?.winner === id ? 3 : 0)
+      + (s.leagues.some((l) => l.champion === id && (S.leagues[l.lid]?.tier || 1) === 1) ? 7 + (LEAGUE_PRESTIGE[S.clubs[id].leagueId] ?? 0) : 0) + (s.cups.some((x) => x.winner === id) ? 3 : 0);
+    const clubs = S.leagueOrder.filter((lid) => (S.leagues[lid].tier || 1) === 1).flatMap((lid) => {
+      const t = leagueTable(lid), byR = t.slice().sort((a, b) => clubRating(b.id) - clubRating(a.id));
+      return t.map((r, i) => ({ id: r.id, sc: tw(r.id) * 1.4 + (byR.findIndex((x) => x.id === r.id) - i) * 1.2 + r.pts / 20 }));
+    }).sort((a, b) => b.sc - a.sc);
+    const coachName = (id) => (id === c.clubId && !isPlayerMode() ? c.manager : `Head coach, ${clubName(id)}`);
+    const cruyff = clubs.slice(0, 5).map((x) => ({ name: coachName(x.id), club: clubName(x.id), clubId: x.id, you: x.id === c.clubId && !isPlayerMode() }));
+    const clubYear = clubs.slice().sort((a, b) => tw(b.id) - tw(a.id) || b.sc - a.sc).slice(0, 5).map((x) => ({ name: clubName(x.id), club: S.leagues[S.clubs[x.id].leagueId].name, clubId: x.id }));
+    const wonder = (c.wonder || []).slice().sort((a, b) => b.sc - a.sc);
+    const seen = new Set(), puskas = [];
+    for (const w of wonder) { if (seen.has(w.pid)) continue; seen.add(w.pid); puskas.push(w); if (puskas.length === 3) break; }
+    c.wonder = [];
+    // Team of the Year
+    const need = [['GK', 1, ['GK']], ['DEF', 4, ['CB', 'LB', 'RB', 'LWB', 'RWB']], ['MID', 3, ['CDM', 'CM', 'CAM', 'LM', 'RM']], ['ATT', 3, ['ST', 'LW', 'RW']]];
+    const byPos = pool.slice().sort((a, b) => score(b) - score(a));
+    const toty = need.flatMap(([line, n, ps]) => byPos.filter((p) => ps.includes(p.pos)).slice(0, n).map((p) => card(p, { line })));
+    // Voting: the winner is usually the favourite, with a little jury drama.
+    const vote = (list, spread) => { const w = list.map((x, i) => Math.max(0.05, 1 - i * spread)); let t = rand() * w.reduce((a, b) => a + b, 0); for (let i = 0; i < w.length; i++) { t -= w[i]; if (t <= 0) return i; } return 0; };
+    const bal = ranked.map((x) => ({ ...x }));
+    const w0 = vote(bal.slice(0, 3), 0.55); if (w0) { const [x] = bal.splice(w0, 1); bal.unshift(x); }
+    const pickW = (list, spread) => { if (!list.length) return list; const i = vote(list, spread); const l = list.slice(); const [x] = l.splice(i, 1); l.unshift(x); return l; };
+    return {
+      year: Y, date: `${Y}-10-26`, season: c.season, done: false,
+      ballon: { nominees: bal.map((x, i) => ({ ...x, rank: i + 1 })) },
+      kopa: pickW(kopa, 0.6), yashin: pickW(yashin, 0.6), muller, cruyff: pickW(cruyff, 0.6), club: clubYear, puskas: pickW(puskas, 0.5), toty,
+    };
+  }
+  // The real 2025 ceremony (for the 2024/25 season), used in your first season.
+  function realAwards2025() {
+    const P = (n) => Object.values(S.players).find((p) => p.name === n);
+    const cl = (n) => Object.values(S.clubs).find((x) => x.name === n)?.id || null;
+    const mk = (n, club, extra) => { const p = P(n); return { pid: p?.id || null, name: n, club, clubId: cl(club), ...(extra || {}) }; };
+    const ballon = [mk('Ousmane Dembélé', 'Paris Saint-Germain'), mk('Lamine Yamal', 'FC Barcelona'), mk('Vitinha', 'Paris Saint-Germain'), mk('Mohamed Salah', 'Liverpool'), mk('Raphinha', 'FC Barcelona'), mk('Achraf Hakimi', 'Paris Saint-Germain')].map((x, i) => ({ ...x, rank: i + 1 }));
+    return {
+      year: 2025, date: '2025-10-26', season: 2024, done: false, real: true,
+      ballon: { nominees: ballon }, kopa: [mk('Lamine Yamal', 'FC Barcelona')], yashin: [mk('Gianluigi Donnarumma', 'Paris Saint-Germain')],
+      muller: [mk('Viktor Gyökeres', 'Sporting CP')], cruyff: [{ name: 'Luis Enrique', club: 'Paris Saint-Germain', clubId: cl('Paris Saint-Germain') }],
+      club: [{ name: 'Paris Saint-Germain', club: 'Ligue 1', clubId: cl('Paris Saint-Germain') }], puskas: [], toty: [],
+    };
+  }
+  const AWARD_LIST = [
+    ['kopa', 'Kopa Trophy', 'Best young player (21 or under)'],
+    ['yashin', 'Yashin Trophy', 'Best goalkeeper'],
+    ['muller', 'Gerd Müller Trophy', 'Top scorer in all competitions'],
+    ['puskas', 'Puskás Award', 'Goal of the season'],
+    ['cruyff', 'Johan Cruyff Trophy', 'Coach of the year'],
+    ['club', 'Club of the Year', 'Best club'],
+  ];
+  // Called after every played day: once the date passes 26 October, the gala takes place.
+  function checkGala() {
+    const c = C(), A = c.awardsNext;
+    if (!A || A.done || curDate() < A.date) return;
+    A.done = true;
+    (c.awardHistory = c.awardHistory || []).unshift(A);
+    c.awardsNext = null;
+    const win = A.ballon.nominees[0];
+    news(`🏆 Ballon d'Or ${A.year}: ${win.name} (${win.club}) wins! 2. ${A.ballon.nominees[1]?.name || '—'}, 3. ${A.ballon.nominees[2]?.name || '—'}.`, win.pid && win.pid === c.pid ? 'good' : 'info');
+    for (const [k, label] of AWARD_LIST) if (A[k] && A[k][0]) news(`🏅 ${label} ${A.year}: ${A[k][0].name}${A[k][0].club && k !== 'club' ? ` (${A[k][0].club})` : ''}.`, 'info');
+    // Your trophies
+    const mineP = (x) => !A.real && x && x.pid && x.pid === c.pid;
+    if (mineP(win)) c.trophies.push({ season: c.season, name: `Ballon d'Or ${A.year}` });
+    for (const [k, label] of AWARD_LIST) { const x = A[k] && A[k][0]; if (mineP(x) || (!A.real && k === 'cruyff' && x?.you) || (!A.real && k === 'club' && x?.clubId === c.clubId && !isPlayerMode())) c.trophies.push({ season: c.season, name: `${label} ${A.year}` }); }
+    c.galaPending = A.year;
+  }
+  // Scene description for the gala cutscene.
+  function galaCfg(A) {
+    const c = C();
+    const hueOf = (x) => { const cl = x.clubId && S.clubs[x.clubId]; return cl ? clubHue(cl) : 210; };
+    const who = (x) => ({ name: x.name, club: x.club, pid: x.pid || x.name, hue: hueOf(x), you: !!(x.pid && x.pid === c.pid) || !!x.you, mine: !!(x.pid && !isPlayerMode() && S.players[x.pid]?.clubId === c.clubId), isGK: x.pos === 'GK', suit: !x.pid });
+    const steps = [];
+    const trophyOf = { kopa: 'kopa', yashin: 'yashin', muller: 'boot', puskas: 'puskas', cruyff: 'cup', club: 'cup' };
+    for (const [k, label, desc] of AWARD_LIST) {
+      const L = A[k]; if (!L || !L.length) continue;
+      steps.push({ key: k, title: label, desc, trophy: trophyOf[k], nominees: L.slice(0, 3).map(who).sort(() => rand() - 0.5), winner: who(L[0]), detail: k === 'puskas' ? `${L[0].desc} v ${L[0].opp}` : k === 'muller' && L[0].goals ? `${L[0].goals} goals` : '' });
+    }
+    const b = A.ballon.nominees;
+    steps.push({ key: 'ballon', title: "Ballon d'Or", desc: 'Best player in the world', trophy: 'ballon', podium: b.slice(0, 3).map(who), winner: who(b[0]), detail: b[0].goals != null ? `${b[0].goals} goals, ${b[0].assists} assists` : '' });
+    return { kind: 'gala', year: A.year, steps };
+  }
+  function playGala(year) {
+    const c = C(), A = (c.awardHistory || []).find((x) => x.year === year);
+    if (!A || !window.SM3D || !window.SM3D.gala) return;
+    ui.celebrating = true;
+    window.SM3D.gala({ ...galaCfg(A), onDone: () => { ui.celebrating = false; c.galaPending = null; save(); render(); } });
+  }
+  function galaInvite() {
+    const c = C(), A = (c.awardHistory || []).find((x) => x.year === c.galaPending);
+    if (!A || ui.celebrating || $('#modal:not([hidden])')) return;
+    const mineN = A.ballon.nominees.filter((n) => n.pid && (n.pid === c.pid || (!isPlayerMode() && S.players[n.pid]?.clubId === c.clubId)));
+    openModal(`<div class="gala-invite"><div class="gi-kicker">26 October ${A.year} · Théâtre du Châtelet, Paris</div><h2>🎟️ You're invited to the Ballon d'Or gala</h2>
+      <p>${isPlayerMode() ? 'Put on your suit: football\'s biggest night is tonight.' : 'The whole football world gathers in Paris tonight.'} The Kopa, Yashin, Gerd Müller, Puskás, Johan Cruyff and Club of the Year awards are presented before the Ballon d'Or itself.</p>
+      ${mineN.length ? `<p class="gi-nom">⭐ Nominated: ${mineN.map((n) => esc(n.name)).join(', ')}</p>` : ''}
+      <div class="row gap"><button class="btn primary big" data-act="gala-attend">Attend the ceremony</button><button class="btn ghost" data-act="gala-skip">Skip (see results)</button></div></div>`);
+  }
+
+  function viewAwards() {
+    const c = C(), A = c.awardsNext, H = c.awardHistory || [], today = curDate();
+    const nextDate = A ? A.date : `${today > `${c.season}-10-26` ? c.season + 1 : c.season}-10-26`;
+    const days = Math.max(0, Math.round((new Date(nextDate) - new Date(today)) / 864e5));
+    const mine = (x) => x && ((x.pid && x.pid === c.pid) || (x.pid && !isPlayerMode() && S.players[x.pid]?.clubId === c.clubId) || x.you);
+    const nm = (x) => `${mine(x) ? '⭐ ' : ''}${x.pid && S.players[x.pid] ? playerLink(S.players[x.pid]) : esc(x.name)}`;
+    // Live race for the season in progress
+    const live = c.seasonOver ? [] : ballonDor({ leagues: S.leagueOrder.filter((l) => c.comps['L-' + l]).map((l) => ({ lid: l, champion: leagueTable(l)[0]?.id })), cups: [] }, 3).slice(0, 10);
+    const last = H[0];
+    const shortlist = (list) => (list || []).slice(0, 5).map((x) => x).sort((a, b) => a.name.localeCompare(b.name));
+    const trophyNames = new Set(["Ballon d'Or", ...AWARD_LIST.map((a) => a[1])]);
+    const myAwards = c.trophies.filter((t) => [...trophyNames].some((n) => t.name.startsWith(n)) || /Golden Boot/.test(t.name));
+    const count = {};
+    for (const h of H) { const w = h.ballon.nominees[0]; count[w.name] = (count[w.name] || 0) + 1; }
+    return `
+      <section class="card gala-hero">
+        <div class="gh-main">
+          <div class="gh-kicker">Ballon d'Or night · Paris</div>
+          <h2>🏆 The awards gala</h2>
+          <p class="muted">Every year on <strong>26 October</strong>, the best of last season are honoured: Ballon d'Or, Kopa Trophy, Yashin Trophy, Gerd Müller Trophy, Puskás Award, Johan Cruyff Trophy and Club of the Year, plus the Team of the Year.</p>
+          ${c.galaPending ? `<button class="btn primary big" data-act="gala-attend">🎟️ Attend tonight's gala</button>` : ''}
+        </div>
+        <div class="gh-count"><span>Next gala</span><strong>${fmtDate(nextDate, true)}</strong><em>${days ? `in ${days} day${days > 1 ? 's' : ''}` : 'tonight'}</em><small>${A ? (A.real ? 'The real 2025 results' : `Honouring the ${seasonLabel(A.season)} season`) : 'Nominees are announced when the season ends'}</small></div>
+      </section>
+      ${A ? `<section class="card"><h3>🎟️ Ballon d'Or ${A.year} nominees <span class="muted small">${A.ballon.nominees.length} players · winner revealed on 26 Oct</span></h3>
+        <div class="nom-grid">${A.ballon.nominees.slice().sort((a, b) => a.name.localeCompare(b.name)).map((x) => `<div class="nom ${mine(x) ? 'mine' : ''}"><strong>${nm(x)}</strong><span class="muted small">${esc(x.club)}${x.goals != null ? ` · ${x.goals} G · ${x.assists} A` : ''}</span></div>`).join('')}</div>
+        <div class="grid g3 mt">${AWARD_LIST.filter(([k]) => (A[k] || []).length).map(([k, label, d]) => `<div class="award-box"><h4>${esc(label)}</h4><p class="muted small">${esc(d)} · shortlist</p><ul class="plist">${shortlist(A[k]).map((x) => `<li class="${mine(x) ? 'mine' : ''}">${nm(x)}<span class="ml-auto muted small">${esc(k === 'puskas' ? x.desc : k === 'club' ? x.club : x.club || '')}</span></li>`).join('')}</ul></div>`).join('')}</div></section>` : ''}
+      <div class="grid g2">
+        <section class="card"><h3>📈 Ballon d'Or race ${c.seasonOver ? '' : `· ${seasonLabel(c.season)}`}</h3>
+          ${live.length ? `<p class="muted small">Live standings for next year's award: goals, assists, ratings and trophies so far.</p><ol class="race">${live.map((x, i) => `<li class="${mine(x) ? 'mine' : ''}"><b>${i + 1}</b> ${nm(x)} <span class="muted small">${esc(x.club)}</span><span class="ml-auto small">${x.goals} G · ${x.assists} A · ${x.avg.toFixed(2)}</span></li>`).join('')}</ol>` : '<p class="muted">The race starts when the new season kicks off.</p>'}
+        </section>
+        <section class="card"><h3>🥇 Your awards</h3>
+          ${myAwards.length ? `<ul class="plist">${myAwards.map((t) => `<li>🏆 ${esc(t.name)}<span class="ml-auto muted small">${seasonLabel(t.season)}</span></li>`).join('')}</ul>` : `<p class="muted">No individual awards yet.${isPlayerMode() ? ' Score goals, win trophies and the Ballon d\'Or could be yours.' : ' Your players and you (Johan Cruyff Trophy) can win them.'}</p>`}
+          ${Object.keys(count).length ? `<h4>Most Ballon d'Ors</h4><ul class="plist">${Object.entries(count).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, k]) => `<li>${esc(n)}<span class="ml-auto">${'🏆'.repeat(k)}</span></li>`).join('')}</ul>` : ''}
+        </section>
+      </div>
+      ${last ? `<section class="card"><div class="row between wrap gap"><h3>🏆 ${last.year} gala results</h3><button class="btn play3d" data-act="gala-watch" data-id="${last.year}">🎬 Watch the ceremony</button></div>
+        <div class="podium3">${last.ballon.nominees.slice(0, 3).map((x, i) => `<div class="pod pod${i + 1} ${mine(x) ? 'mine' : ''}"><span>${['🥇', '🥈', '🥉'][i]}</span><strong>${nm(x)}</strong><small>${esc(x.club)}</small></div>`).join('')}</div>
+        <div class="stats-row">${AWARD_LIST.filter(([k]) => (last[k] || []).length).map(([k, label]) => `<div class="big-stat ${mine(last[k][0]) ? 'mine' : ''}"><span>${esc(label)}</span><strong>${nm(last[k][0])}</strong><small>${esc(k === 'puskas' ? `${last[k][0].desc} v ${last[k][0].opp}` : k === 'club' ? last[k][0].club : last[k][0].club || '')}</small></div>`).join('')}</div>
+        ${(last.toty || []).length ? `<h4>Team of the Year</h4><div class="toty">${['ATT', 'MID', 'DEF', 'GK'].map((l) => `<div class="toty-row">${last.toty.filter((x) => x.line === l).map((x) => `<span class="toty-p ${mine(x) ? 'mine' : ''}">${posBadge(x.pos)} ${nm(x)}<small>${esc(x.club)}</small></span>`).join('')}</div>`).join('')}</div>` : ''}
+      </section>` : ''}
+      ${H.length ? `<section class="card"><h3>🏛️ Hall of fame</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Year</th><th class="left">Ballon d'Or</th>${AWARD_LIST.map(([, l]) => `<th class="left hide-sm">${esc(l)}</th>`).join('')}<th></th></tr></thead><tbody>
+        ${H.map((h) => `<tr><td>${h.year}</td><td class="left"><strong>${nm(h.ballon.nominees[0])}</strong></td>${AWARD_LIST.map(([k]) => `<td class="left small hide-sm">${h[k] && h[k][0] ? nm(h[k][0]) : '—'}</td>`).join('')}<td><button class="btn xs ghost" data-act="gala-watch" data-id="${h.year}">🎬</button></td></tr>`).join('')}
+      </tbody></table></div></section>` : ''}`;
   }
 
   function startNextSeason() {
@@ -3061,8 +3234,8 @@
   /* ------------------------------------------------------------------ *
    * Game shell
    * ------------------------------------------------------------------ */
-  const TABS = [['home', 'Home'], ['match', 'Match'], ['squad', 'Squad & Tactics'], ['training', 'Training'], ['transfers', 'Transfers'], ['academy', 'Academy'], ['fixtures', 'Fixtures'], ['comps', 'Competitions'], ['intl', 'International'], ['stats', 'Stats'], ['data', 'Data']];
-  const TABS_PLAYER = [['home', 'Home'], ['match', 'Match'], ['career', 'My Career'], ['club', 'Club'], ['fixtures', 'Fixtures'], ['comps', 'Competitions'], ['intl', 'International'], ['stats', 'Stats'], ['data', 'Data']];
+  const TABS = [['home', 'Home'], ['match', 'Match'], ['squad', 'Squad & Tactics'], ['training', 'Training'], ['transfers', 'Transfers'], ['academy', 'Academy'], ['fixtures', 'Fixtures'], ['comps', 'Competitions'], ['intl', 'International'], ['awards', 'Awards'], ['stats', 'Stats'], ['data', 'Data']];
+  const TABS_PLAYER = [['home', 'Home'], ['match', 'Match'], ['career', 'My Career'], ['club', 'Club'], ['fixtures', 'Fixtures'], ['comps', 'Competitions'], ['intl', 'International'], ['awards', 'Awards'], ['stats', 'Stats'], ['data', 'Data']];
   function render() {
     if (!S || !S.career) return renderStart();
     if (view !== 'match' || !ui.playback) clearTimers();
@@ -3087,6 +3260,7 @@
       <main id="view" class="view">${renderView()}</main>`;
     if (view === 'match' && ui.playback) mountPlayback();
     if (c.celebrate && c.celebrate.length && !ui.playback && !ui.celebrating) setTimeout(playCelebrations, 350);
+    else if (c.galaPending && !ui.playback && !ui.celebrating && ui.galaAsked !== c.galaPending) { ui.galaAsked = c.galaPending; setTimeout(galaInvite, 400); }
   }
   function renderView() {
     switch (view) {
@@ -3102,6 +3276,7 @@
       case 'academy': return viewAcademy();
       case 'training': return viewTraining();
       case 'intl': return viewIntl();
+      case 'awards': return viewAwards();
       default: return isPlayerMode() ? viewHomePlayer() : viewHome();
     }
   }
@@ -3225,7 +3400,7 @@
         <h4>League champions & cup winners</h4>
         <div class="stats-row">${s.leagues.map((l) => win(S.leagues[l.lid].name, l.champion, (s.cups.find((x) => x.lid === l.lid) ? `${s.cups.find((x) => x.lid === l.lid).name}: ${clubName(s.cups.find((x) => x.lid === l.lid).winner)}` : ''))).join('')}</div>
         <div class="stats-row">
-          ${(s.ballon || []).length ? `<div class="big-stat"><span>Ballon d'Or ${c.season + 1}</span><strong>🏆 ${esc(s.ballon[0].name)}</strong><small>${esc(s.ballon[0].club)} · 2. ${esc(s.ballon[1]?.name || '—')} · 3. ${esc(s.ballon[2]?.name || '—')}</small></div>` : ''}
+          ${(s.ballon || []).length ? `<div class="big-stat"><span>Ballon d'Or ${c.season + 1} · gala 26 Oct</span><strong>🎟️ 30 nominees</strong><small>Including ${s.ballon.map((x) => esc(x.name)).sort().join(', ')} · <button class="link" data-act="tab" data-id="awards">Awards tab</button></small></div>` : ''}
           ${s.topScorer ? `<div class="big-stat"><span>Golden Boot</span><strong>${esc(s.topScorer.name)}</strong><small>${esc(s.topScorer.club)} · ${s.topScorer.goals} league goals</small></div>` : ''}
           ${s.bestPlayer ? `<div class="big-stat"><span>Player of the season</span><strong>${esc(s.bestPlayer.name)}</strong><small>${esc(s.bestPlayer.club)} · ${s.bestPlayer.avg} avg</small></div>` : ''}
         </div>
@@ -4515,6 +4690,9 @@
     },
     simulate: () => doSimulate(),
     play3d: () => play3d(),
+    'gala-attend': () => { const y = C().galaPending; closeModal(); playGala(y); },
+    'gala-skip': () => { C().galaPending = null; closeModal(); save(); go('awards'); },
+    'gala-watch': (y) => playGala(+y),
     'replay-celebrations': () => { const c = C(); c.celebrate = (c.lastCelebrate || []).slice(); playCelebrations(); },
     'skip-playback': () => finishPlayback(),
     'end-playback': () => { clearTimers(); ui.playback = null; go('home'); },
@@ -4749,6 +4927,7 @@
     if (!st.clubs.YTH) st.clubs.YTH = { id: 'YTH', name: 'Youth academy', short: 'YTH', leagueId: null, pids: [], level: 50, budget: 0, youth: true };
     if (st.career && st.career.mode !== 'player' && !st.career.academy) academySetup();
     if (st.career && !st.career.loans) st.career.loans = [];
+    if (st.career && st.career.awardsNext === undefined && !st.career.awardHistory) st.career.awardsNext = st.career.season === 2025 ? realAwards2025() : null;
     S = prev === st ? st : prev;
     if (st.career) S = st;
   }

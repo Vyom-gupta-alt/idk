@@ -603,7 +603,7 @@
       b.vx = Math.cos(ang) * speed; b.vz = Math.sin(ang) * speed;
       b.vy = clamp((ty - BR) / t + 0.5 * G * t + gauss() * err * 12, 0, 16);
       b.y = BR + 0.02;
-      b.shot = { pid: p.pid, side: p.side, t: this.t }; b.checked = false; b.pass = null; b.spin = 0;
+      b.shot = { pid: p.pid, side: p.side, t: this.t, dist, kind: 'power' }; b.checked = false; b.pass = null; b.spin = 0;
       this.st.shots[p.side]++;
     }
     finesse(p, iz) {
@@ -620,7 +620,7 @@
       b.vy = clamp((1.1 - BR) / t + 0.5 * G * t, 0, 12);
       b.y = BR + 0.02;
       b.spin = (2 * bend) / (t * t);
-      b.shot = { pid: p.pid, side: p.side, t: this.t }; b.checked = false; b.pass = null;
+      b.shot = { pid: p.pid, side: p.side, t: this.t, dist, kind: 'finesse' }; b.checked = false; b.pass = null;
       this.st.shots[p.side]++;
     }
 
@@ -1029,7 +1029,8 @@
       if (!og && b.assist && b.assist.side === side && b.assist.pid !== pid && this.t - b.assist.t < 12) apid = b.assist.pid;
       if (!og && b.shot) this.st.sot[side]++;
       const min = this.minute();
-      this.goals.push({ min, side, pid, apid, og });
+      const sh = b.shot && b.shot.side === side ? b.shot : null;
+      this.goals.push({ min, side, pid, apid, og, dist: sh ? +sh.dist.toFixed(1) : 0, kind: sh ? sh.kind : '' });
       const who = og ? `an own goal by ${b.last ? b.last.name : 'a defender'}` : this.nameOf(pid);
       this.say('goal', side, `GOAL! ${og ? `It's ${who}!` : `${who} scores${apid ? ` (assist: ${this.nameOf(apid)})` : ''}!`} ${cfg.teams[0].short} ${this.score[0]}-${this.score[1]} ${cfg.teams[1].short}`);
       this.flash(`GOAL! ${og ? 'Own goal' : this.nameOf(pid)}`, 2.2);
@@ -1381,5 +1382,202 @@
     return g;
   }
 
-  window.SM3D = { start, celebrate };
+  /* ================= Awards gala (Ballon d'Or night) ================= */
+  function gala(cfg) {
+    const root = document.createElement('div');
+    root.id = 'm3d'; root.className = 'celebr gala';
+    root.innerHTML = `
+      <div class="m3d-stage"></div>
+      <div class="gala-top"><div class="cel-kicker"></div><h2 class="gala-title"></h2><div class="gala-desc"></div></div>
+      <div class="gala-noms"></div>
+      <div class="gala-reveal"><div class="gr-lead"></div><div class="gr-name"></div><div class="gr-sub"></div></div>
+      <div class="cel-btns"><button class="btn ghost" data-g="skip">Leave the gala</button><button class="btn primary" data-g="next">Next ▸</button></div>
+      <div class="m3d-loading">Loading…</div>`;
+    document.body.appendChild(root);
+    document.body.classList.add('m3d-open');
+    setTimeout(() => root.classList.add('show'), 60);
+    loadThree((err) => {
+      root.querySelector('.m3d-loading').remove();
+      new Gala(cfg, root, err ? null : window.THREE);
+    });
+  }
+  class Gala {
+    constructor(cfg, root, T) {
+      this.cfg = cfg; this.root = root; this.T = T; this.i = -1; this.sub = 0; this.t = 0; this.figs = [];
+      const q = (x) => root.querySelector(x);
+      this.el = { kicker: q('.cel-kicker'), title: q('.gala-title'), desc: q('.gala-desc'), noms: q('.gala-noms'), rev: q('.gala-reveal'), lead: q('.gr-lead'), name: q('.gr-name'), sub: q('.gr-sub'), next: q('[data-g="next"]') };
+      this.onKey = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.next(); } if (e.key === 'Escape') this.close(); };
+      window.addEventListener('keydown', this.onKey);
+      root.addEventListener('click', (e) => { const a = e.target.closest('[data-g]')?.dataset.g; if (a === 'next') this.next(); else if (a === 'skip') this.close(); });
+      if (T) this.build();
+      this.intro();
+    }
+    build() {
+      const T = this.T;
+      const r = (this.renderer = new T.WebGLRenderer({ antialias: true }));
+      r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      r.shadowMap.enabled = true;
+      this.root.querySelector('.m3d-stage').appendChild(r.domElement);
+      const scene = (this.scene = new T.Scene());
+      scene.background = new T.Color(0x07040c); scene.fog = new T.Fog(0x07040c, 25, 70);
+      this.cam = new T.PerspectiveCamera(42, 1, 0.1, 200);
+      scene.add(new T.HemisphereLight(0x9aa5ff, 0x1a0b10, 0.35));
+      const key = new T.SpotLight(0xfff1d0, 2.4, 50, 0.32, 0.5); key.position.set(0, 16, 6); key.target.position.set(0, 1, -3); key.castShadow = true;
+      scene.add(key); scene.add(key.target); this.key = key;
+      // Hall: floor, carpet, stage, back wall with screen, golden arch
+      const floor = new T.Mesh(new T.PlaneGeometry(80, 80), new T.MeshStandardMaterial({ color: 0x120a10, roughness: 0.8 }));
+      floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+      const carpet = new T.Mesh(new T.PlaneGeometry(3, 26), new T.MeshStandardMaterial({ color: 0x7f1d1d, roughness: 0.9 }));
+      carpet.rotation.x = -Math.PI / 2; carpet.position.set(0, 0.01, 8); scene.add(carpet);
+      const stage = new T.Mesh(new T.BoxGeometry(18, 1, 7), new T.MeshStandardMaterial({ color: 0x1c1117, roughness: 0.3, metalness: 0.3 }));
+      stage.position.set(0, 0.5, -4); stage.receiveShadow = true; scene.add(stage);
+      const edge = new T.Mesh(new T.BoxGeometry(18.2, 0.08, 0.1), new T.MeshBasicMaterial({ color: 0xfacc15 })); edge.position.set(0, 1.0, -0.5); scene.add(edge);
+      const wall = new T.Mesh(new T.PlaneGeometry(30, 16), new T.MeshStandardMaterial({ color: 0x0e0a14, roughness: 0.9 })); wall.position.set(0, 8, -7.6); scene.add(wall);
+      const sc = document.createElement('canvas'); sc.width = 1024; sc.height = 512; this.screenCtx = sc.getContext('2d');
+      this.screenTex = new T.CanvasTexture(sc);
+      const screen = new T.Mesh(new T.PlaneGeometry(12, 6), new T.MeshBasicMaterial({ map: this.screenTex })); screen.position.set(0, 6.2, -7.5); scene.add(screen);
+      const gold = new T.MeshStandardMaterial({ color: 0xffd34d, metalness: 0.5, roughness: 0.25, emissive: 0x8a5a00, emissiveIntensity: 0.5 });
+      const arch = new T.Mesh(new T.TorusGeometry(8.2, 0.12, 10, 80, Math.PI), gold); arch.position.set(0, 1, -7.3); scene.add(arch);
+      const big = new T.Mesh(new T.SphereGeometry(1.1, 40, 30), gold); big.position.set(-6.6, 2.6, -5.2); big.castShadow = true; scene.add(big); this.bigBall = big;
+      const ped = new T.Mesh(new T.CylinderGeometry(0.7, 0.9, 1, 32), new T.MeshStandardMaterial({ color: 0x111111, roughness: 0.3 })); ped.position.set(-6.6, 1.5, -5.2); scene.add(ped);
+      // Audience: rows of seated guests
+      const rows = 9, per = 22, n = rows * per;
+      const body = new T.InstancedMesh(new T.CylinderGeometry(0.22, 0.26, 0.7, 8), new T.MeshStandardMaterial({ roughness: 0.8 }), n);
+      const head = new T.InstancedMesh(new T.SphereGeometry(0.13, 10, 8), new T.MeshStandardMaterial({ roughness: 0.6 }), n);
+      const d = new T.Object3D(); let k = 0;
+      const suits = [0x111827, 0x1f2937, 0x3f1d38, 0x0f172a, 0x7f1d1d, 0x1e3a8a, 0x111111];
+      const skins = [0xf1c9a5, 0xe0ac86, 0xc68a62, 0xa86b45, 0x7d4a2c];
+      for (let rr = 0; rr < rows; rr++) for (let i = 0; i < per; i++) {
+        const x = (i - per / 2 + 0.5) * 1.05 + (Math.abs(i - per / 2 + 0.5) < 1.6 ? Math.sign(i - per / 2 + 0.5) * 1.2 : 0);
+        const z = 3 + rr * 1.4, y = 0.35 + rr * 0.35;
+        d.position.set(x, y + 0.45, z); d.rotation.set(0, 0, 0); d.updateMatrix(); body.setMatrixAt(k, d.matrix); body.setColorAt(k, new T.Color(suits[(rr * 7 + i * 3) % suits.length]));
+        d.position.set(x, y + 0.95, z); d.updateMatrix(); head.setMatrixAt(k, d.matrix); head.setColorAt(k, new T.Color(skins[(rr * 5 + i * 11) % skins.length]));
+        k++;
+      }
+      scene.add(body); scene.add(head); this.audience = head;
+      const tiers = new T.Mesh(new T.BoxGeometry(26, 3, 14), new T.MeshStandardMaterial({ color: 0x160d14 })); tiers.position.set(0, -1.2 + 0.0, 9.5); tiers.rotation.x = -0.24; scene.add(tiers);
+      // Sweeping beams
+      this.beams = [];
+      for (let i = 0; i < 4; i++) {
+        const b = new T.Mesh(new T.ConeGeometry(1.4, 16, 24, 1, true), new T.MeshBasicMaterial({ color: [0xfde68a, 0x93c5fd, 0xf0abfc, 0xfde68a][i], transparent: true, opacity: 0.06, side: T.DoubleSide, depthWrite: false, blending: T.AdditiveBlending }));
+        b.position.set(-9 + i * 6, 8, -6); scene.add(b); this.beams.push(b);
+      }
+      // Confetti
+      const N = 500; this.conf = new T.InstancedMesh(new T.PlaneGeometry(0.09, 0.05), new T.MeshBasicMaterial({ side: T.DoubleSide }), N); this.cp = [];
+      for (let i = 0; i < N; i++) { this.cp.push({ x: (rnd() - 0.5) * 16, y: -5, z: -4 + (rnd() - 0.5) * 6, vy: 0.8 + rnd(), r: rnd() * 6, s: 1 + rnd() * 2, ph: rnd() * 6 }); this.conf.setColorAt(i, new T.Color([0xfacc15, 0xfde68a, 0xffffff][i % 3])); }
+      scene.add(this.conf); this.dummy = new T.Object3D();
+      this.resize = () => { const w = window.innerWidth, h = window.innerHeight; r.setSize(w, h); this.cam.aspect = w / h; this.cam.updateProjectionMatrix(); };
+      window.addEventListener('resize', this.resize); this.resize();
+      this.last = performance.now(); this.loop = this.loop.bind(this); this.raf = requestAnimationFrame(this.loop);
+      window.SM3D.galaCur = this;
+    }
+    screen(l1, l2, l3) {
+      if (!this.screenCtx) return;
+      const g = this.screenCtx; g.fillStyle = '#0b0710'; g.fillRect(0, 0, 1024, 512);
+      const grd = g.createRadialGradient(512, 256, 20, 512, 256, 560); grd.addColorStop(0, 'rgba(202,138,4,.35)'); grd.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = grd; g.fillRect(0, 0, 1024, 512);
+      // Backdrop only (the on-screen captions carry the text): award name and emblem.
+      g.textAlign = 'center';
+      g.strokeStyle = 'rgba(250,204,21,.5)'; g.lineWidth = 4; g.beginPath(); g.arc(512, 230, 120, 0, Math.PI * 2); g.stroke();
+      g.fillStyle = 'rgba(250,204,21,.22)'; g.beginPath(); g.arc(512, 230, 100, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(253,230,138,.8)'; g.font = '800 44px Inter, Arial'; g.fillText(l1 || '', 512, 430, 960);
+      this.screenTex.needsUpdate = true;
+    }
+    figure(w, x) {
+      if (!this.T) return null;
+      const T = this.T, cols = [kitColors(T, w.hue)];
+      if (w.suit) { cols[0].kit = new T.Color(0x1f2937); cols[0].shorts = new T.Color(0x111827); cols[0].socks = new T.Color(0x111827); }
+      const h = new HumanKit(T, cols).build({ pid: w.pid, name: w.name, num: w.isGK ? 1 : 10, side: 0, isGK: w.isGK });
+      h.root.position.set(x, 1.0, -3.2); h.root.rotation.y = -Math.PI / 2 + 0.0; // face the audience (+Z)
+      this.scene.add(h.root);
+      const f = { h, x0: x < 0 ? -9.5 : 9.5, x, t0: this.t, trophy: null, lift: false };
+      h.root.position.x = f.x0;
+      this.figs.push(f);
+      return f;
+    }
+    clearFigs() { for (const f of this.figs) { this.scene.remove(f.h.root); if (f.trophy) this.scene.remove(f.trophy); } this.figs = []; }
+    burst() { for (const c of this.cp) { c.y = 7 + rnd() * 6; c.x = (rnd() - 0.5) * 16; } }
+    intro() {
+      const c = this.cfg;
+      this.el.kicker.textContent = `Ballon d'Or ${c.year} · Paris`;
+      this.el.title.textContent = 'Welcome to the gala';
+      this.el.desc.textContent = `${c.steps.length} awards tonight. The Ballon d'Or is presented last.`;
+      this.el.noms.innerHTML = ''; this.el.rev.classList.remove('on');
+      this.el.next.textContent = 'Begin ▸';
+      this.screen(`BALLON D'OR ${c.year}`, 'The Gala', 'Théâtre du Châtelet · Paris');
+    }
+    next() {
+      const st = this.cfg.steps[this.i];
+      if (st && this.sub < this.maxSub(st)) { this.sub++; return this.reveal(st); }
+      this.i++; this.sub = 0;
+      if (this.i >= this.cfg.steps.length) return this.close();
+      this.showNominees(this.cfg.steps[this.i]);
+    }
+    maxSub(st) { return st.podium ? 3 : 1; }
+    showNominees(st) {
+      this.clearFigs(); this.el.rev.classList.remove('on');
+      this.el.kicker.textContent = `Ballon d'Or ${this.cfg.year} · Award ${this.i + 1} of ${this.cfg.steps.length}`;
+      this.el.title.textContent = st.title; this.el.desc.textContent = st.desc;
+      const list = st.podium ? st.podium.slice().sort(() => rnd() - 0.5) : st.nominees;
+      this.el.noms.innerHTML = `<div class="gn-h">The nominees</div>${list.map((n) => `<div class="gn ${n.you ? 'you' : n.mine ? 'mine' : ''}"><strong>${esc(n.name)}</strong><span>${esc(n.club || '')}</span></div>`).join('')}`;
+      this.el.next.textContent = st.podium ? 'Reveal 3rd place ▸' : 'Open the envelope ▸';
+      this.screen(st.title.toUpperCase(), 'The nominees are…', list.map((n) => n.name.split(' ').slice(-1)[0]).join(' · '));
+      this.camT = 0;
+    }
+    reveal(st) {
+      const podium = !!st.podium;
+      const place = podium ? 3 - this.sub + 1 : 1; // 3, 2, 1
+      const w = podium ? st.podium[place - 1] : st.winner;
+      this.el.noms.innerHTML = '';
+      this.el.rev.classList.remove('on'); void this.el.rev.offsetWidth; this.el.rev.classList.add('on');
+      this.el.lead.textContent = podium ? (place === 1 ? `And the ${this.cfg.year} Ballon d'Or goes to…` : `In ${place === 3 ? 'third' : 'second'} place…`) : 'And the winner is…';
+      this.el.name.textContent = w.name;
+      this.el.sub.textContent = `${w.club || ''}${st.detail && place === 1 ? ` · ${st.detail}` : ''}${w.you ? ' · 🎉 THAT\'S YOU!' : w.mine ? ' · ⭐ Your player' : ''}`;
+      this.screen(podium ? (place === 1 ? "BALLON D'OR" : `${place === 2 ? '2ND' : '3RD'} PLACE`) : st.title.toUpperCase(), w.name, w.club || '');
+      const x = podium ? (place === 1 ? 0 : place === 2 ? -2.6 : 2.6) : 0;
+      const f = this.figure(w, x);
+      if (f && place === 1) { f.trophy = makeTrophy(this.T, st.trophy === 'kopa' || st.trophy === 'yashin' || st.trophy === 'puskas' ? 'ballon' : st.trophy); if (st.trophy === 'yashin' || st.trophy === 'puskas') f.trophy.traverse((o) => { if (o.material && o.material.color) { o.material = o.material.clone(); o.material.color.set(0xe5e7eb); o.material.emissive && o.material.emissive.set(0x555555); } }); this.scene.add(f.trophy); f.lift = true; this.burst(); }
+      this.el.next.textContent = podium && place > 1 ? `Reveal ${place === 3 ? '2nd place' : 'the winner'} ▸` : this.i + 1 >= this.cfg.steps.length ? 'Finish ▸' : 'Next award ▸';
+      this.revT = this.t;
+    }
+    loop(now) {
+      this.raf = requestAnimationFrame(this.loop);
+      const dt = Math.min(0.05, (now - this.last) / 1000); this.last = now; this.t += dt; const t = this.t;
+      for (const f of this.figs) {
+        const k = clamp((t - f.t0) / 1.6, 0, 1), e = k * k * (3 - 2 * k), r = f.h;
+        r.root.position.x = f.x0 + (f.x - f.x0) * e;
+        const walking = k < 1;
+        r.root.rotation.y = walking ? (f.x > f.x0 ? 0 : Math.PI) : r.root.rotation.y + (-Math.PI / 2 - r.root.rotation.y) * Math.min(1, dt * 5);
+        const ph = t * 8;
+        r.legs.forEach((L, i) => { L.hip.rotation.z = walking ? Math.sin(ph + i * Math.PI) * 0.4 : 0; L.kn.rotation.z = walking ? -Math.max(0, Math.sin(ph + i * Math.PI + 1.9)) * 0.6 : -0.05; });
+        const up = f.lift && !walking ? clamp((t - f.t0 - 1.6) / 0.8, 0, 1) : 0;
+        r.arms.forEach((A, i) => { A.sh.rotation.z = walking ? Math.sin(ph + (i ? 0 : Math.PI)) * 0.35 : 0.1 + up * 2.8 + (f.lift ? 0 : Math.sin(t * 2 + i) * 0.05 + (i ? 0 : 0.3)); A.sh.rotation.x = A.s * (0.12 + up * 0.15); A.el.rotation.z = up ? 0.1 : 0.3; });
+        if (f.trophy) {
+          const th = r.root.rotation.y, sc = r.root.scale.y;
+          const hx = r.root.position.x + Math.cos(th) * 0.3 * (1 - up) + Math.cos(th) * 0.12 * up, hz = r.root.position.z - Math.sin(th) * (0.3 * (1 - up) + 0.12 * up);
+          f.trophy.position.set(hx, 1.0 + (1.15 + up * 0.85) * sc, hz); f.trophy.rotation.y = t * 0.6;
+        }
+      }
+      for (let i = 0; i < this.beams.length; i++) { const b = this.beams[i]; b.rotation.z = Math.sin(t * 0.6 + i * 1.7) * 0.5; b.rotation.x = Math.cos(t * 0.5 + i) * 0.25; }
+      this.bigBall.rotation.y = t * 0.3;
+      for (let i = 0; i < this.cp.length; i++) { const c = this.cp[i]; if (c.y > -1) { c.y -= c.vy * dt; c.r += c.s * dt; c.x += Math.sin(t + c.ph) * 0.3 * dt; } this.dummy.position.set(c.x, c.y, c.z); this.dummy.rotation.set(c.r, c.r * 0.6, 0); this.dummy.updateMatrix(); this.conf.setMatrixAt(i, this.dummy.matrix); }
+      this.conf.instanceMatrix.needsUpdate = true;
+      // Camera: wide shot of the stage; pushes in on the winner.
+      const focus = this.figs.length && this.revT != null && t - this.revT < 6;
+      const tx = focus ? this.figs[this.figs.length - 1].x * 0.5 : Math.sin(t * 0.15) * 2, tz = focus ? 5.5 : 11 + Math.sin(t * 0.2);
+      const ty = focus ? 2.6 : 4.2;
+      this.cx = (this.cx ?? tx) + (tx - (this.cx ?? tx)) * Math.min(1, dt * 1.5); this.cz = (this.cz ?? tz) + (tz - (this.cz ?? tz)) * Math.min(1, dt * 1.5); this.cy = (this.cy ?? ty) + (ty - (this.cy ?? ty)) * Math.min(1, dt * 1.5);
+      this.cam.position.set(this.cx, this.cy, this.cz); this.cam.lookAt(this.cx * 0.6, focus ? 2.2 : 3, -4);
+      this.renderer.render(this.scene, this.cam);
+    }
+    close() {
+      if (this.closed) return; this.closed = true;
+      cancelAnimationFrame(this.raf); window.removeEventListener('keydown', this.onKey);
+      if (this.resize) window.removeEventListener('resize', this.resize);
+      if (this.renderer) this.renderer.dispose();
+      this.root.remove(); document.body.classList.remove('m3d-open');
+      this.cfg.onDone && this.cfg.onDone();
+    }
+  }
+
+  window.SM3D = { start, celebrate, gala };
 })();
