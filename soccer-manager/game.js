@@ -1129,13 +1129,41 @@
     }
     return lines.join('\n');
   }
+  // Shows the text in a panel with Copy and Download buttons. Downloads are
+  // blocked in some embedded viewers, so copying is always available.
+  let exportFile = null;
   function download(name, text, type = 'text/csv') {
-    const blob = new Blob([text], { type });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    exportFile = { name, text, type };
+    openModal(`
+      <h2>${esc(name)}</h2>
+      <p class="muted small">Copy the text below and save it as <code>${esc(name)}</code>, or try the download button.</p>
+      <textarea id="export-text" class="input textarea" rows="10" readonly>${esc(text)}</textarea>
+      <div class="row gap wrap"><button class="btn primary" data-act="export-copy">Copy to clipboard</button><button class="btn ghost" data-act="export-dl">Download file</button><button class="btn ghost" data-act="close">Close</button></div>`, true);
+  }
+  function exportCopy() {
+    const ta = $('#export-text');
+    const done = () => toast('Copied to clipboard.', 'good');
+    const fallback = () => { ta.focus(); ta.select(); try { document.execCommand('copy'); done(); } catch (e) { toast('Text selected. Press Ctrl+C (Cmd+C) to copy it.', 'info'); } };
+    try { navigator.clipboard.writeText(ta.value).then(done, fallback); } catch (e) { fallback(); }
+  }
+  function exportDownload() {
+    if (!exportFile) return;
+    try {
+      const blob = new Blob([exportFile.text], { type: exportFile.type });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = exportFile.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } catch (e) { /* blocked: the copy button still works */ }
+    toast('If nothing downloaded, use "Copy to clipboard" instead.', 'info');
+  }
+
+  // In-page confirmation (browser confirm() dialogs are blocked in some viewers).
+  let pendingConfirm = null;
+  function askConfirm(msg, fn, okLabel = 'Confirm') {
+    pendingConfirm = fn;
+    openModal(`<h2>Are you sure?</h2><p>${esc(msg)}</p><div class="row gap mt"><button class="btn primary" data-act="confirm-yes">${esc(okLabel)}</button><button class="btn ghost" data-act="close">Cancel</button></div>`);
   }
 
   /* ------------------------------------------------------------------ *
@@ -1913,19 +1941,20 @@
     'start-career': () => {
       if (!ui.startClub) return;
       const saved = loadCareer();
-      if (saved && saved.career && !confirm('Starting a new career will overwrite your saved career. Continue?')) return;
-      startCareer(ui.startClub, ($('#mgr-name')?.value || '').trim() || 'The Gaffer');
-      view = 'home'; render();
+      const name = ($('#mgr-name')?.value || '').trim() || 'The Gaffer';
+      const go2 = () => { startCareer(ui.startClub, name); view = 'home'; render(); };
+      if (saved && saved.career) askConfirm('Starting a new career will overwrite your saved career.', go2, 'Start new career');
+      else go2();
     },
     continue: () => { S = loadCareer(); invalidate(); view = 'home'; render(); },
-    'delete-save': () => { if (confirm('Delete your saved career?')) { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ } renderStart(); } },
+    'delete-save': () => askConfirm('Delete your saved career?', () => { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ } renderStart(); }, 'Delete'),
     'open-import': () => { openModal(`<h2>Import FC 26 ratings</h2>${importPanelHtml(false)}`, true); },
     'do-import': () => {
       const inCareer = !!(S && S.career);
       const html = runImport(inCareer ? S : W, inCareer);
       if (html) { $('#imp-report').innerHTML = html; if (!inCareer) { S = W; invalidate(); } }
     },
-    'reset-world': () => { if (!confirm('Discard imported ratings and restore the built-in database?')) return; try { localStorage.removeItem(WORLD_KEY); } catch (e) { /* ignore */ } W = buildWorld(); S = W; closeModal(); renderStart(); toast('Database reset.', 'good'); },
+    'reset-world': () => askConfirm('Discard imported ratings and restore the built-in database?', () => { try { localStorage.removeItem(WORLD_KEY); } catch (e) { /* ignore */ } W = buildWorld(); S = W; renderStart(); toast('Database reset.', 'good'); }, 'Reset'),
     'dl-template': () => download('fc26-ratings-template.csv', 'Name,Club,Position,OVR,Age,League\nKylian Mbappé,Real Madrid,ST,91,26,LaLiga\nErling Haaland,Manchester City,ST,90,25,Premier League\nNew Player,Arsenal,CM,74,20,Premier League\n'),
     'dl-export': () => download('soccer-manager-database.csv', exportCSV(S && S.career ? S : W)),
     tab: (id) => { if (id !== 'match') ui.playback = null; go(id); },
@@ -1949,7 +1978,7 @@
     sell: (id) => sellModal(id),
     'refresh-offers': (id) => sellModal(id),
     'accept-sale': (i) => { const so = ui.sellOffers; const o = so && so.offers[+i]; if (!o) return; sellPlayer(so.pid, o.clubId, o.amount); closeModal(); render(); },
-    release: (id) => { if (!confirm('Release this player for free?')) return; sellPlayer(id, 'FA', 0); closeModal(); render(); },
+    release: (id) => askConfirm(`Release ${S.players[id].name} for free?`, () => { sellPlayer(id, 'FA', 0); render(); }, 'Release'),
     buy: (id) => buyModal(id),
     'confirm-buy': (id) => { if (buyPlayer(id)) { closeModal(); render(); } },
     'accept-offer': (id) => { const c = C(); const o = c.offers.find((x) => x.id === id); if (!o) return; if (S.clubs[o.clubId].budget < o.amount) { c.offers = c.offers.filter((x) => x !== o); toast('The buyer can no longer afford the deal.', 'bad'); return render(); } sellPlayer(o.pid, o.clubId, o.amount); render(); },
@@ -1959,7 +1988,7 @@
     'md-next': () => { ui.fixMd = Math.min(C().rounds.length - 1, ui.fixMd + 1); render(); },
     'md-go': (id) => { ui.fixMd = +id; render(); },
     'sim-to': (id) => { const n = simUntil(+id); toast(`Simulated ${n} matchday${n === 1 ? '' : 's'}.`, 'good'); ui.fixMd = C().md; render(); },
-    'sim-end': () => { if (!confirm('Simulate every remaining match of the season?')) return; simUntil(C().rounds.length); render(); },
+    'sim-end': () => askConfirm('Simulate every remaining match of the season?', () => { simUntil(C().rounds.length); render(); }, 'Simulate'),
     report: (id) => { const [md, i] = id.split(':').map(Number); matchReport(md, i); },
     'stats-tab': (id) => { ui.statsTab = id; render(); },
     player: (id) => playerModal(id),
@@ -1975,8 +2004,11 @@
     },
     'export-save': () => download(`soccer-manager-${seasonLabel(C().season).replace('/', '-')}.json`, JSON.stringify(S), 'application/json'),
     'to-menu': () => { save(); S = W; ui.startLeague = null; ui.startClub = null; renderStart(); },
-    abandon: () => { if (!confirm('Abandon this career? Your save will be deleted.')) return; try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ } S = W; renderStart(); },
+    abandon: () => askConfirm('Abandon this career? Your save will be deleted.', () => { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ } S = W; renderStart(); }, 'Abandon'),
     close: () => closeModal(),
+    'confirm-yes': () => { const f = pendingConfirm; pendingConfirm = null; closeModal(); if (f) f(); },
+    'export-copy': () => exportCopy(),
+    'export-dl': () => exportDownload(),
   };
 
   const CHANGES = {
