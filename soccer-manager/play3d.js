@@ -52,6 +52,147 @@
     });
   }
 
+  const CAMS = [
+    { name: 'Broadcast', h: 17, d: 26, ly: 0, fx: 0.9, fz: 0.45, zc: 12, edge: 8 },
+    { name: 'Close', h: 7.5, d: 13, ly: 0.8, fx: 1, fz: 0.8, zc: 26, edge: 2, follow: true },
+    { name: 'Wide', h: 34, d: 44, ly: 0, fx: 0.8, fz: 0.3, zc: 8, edge: 14 },
+  ];
+  const SKIN = [0xf1c9a5, 0xe0ac86, 0xc68a62, 0xa86b45, 0x7d4a2c, 0x5a3420];
+  const HAIR = [0x1b120c, 0x2e1d12, 0x4a2f1b, 0x7a5230, 0xc49a5c, 0x0d0d0d];
+  const BOOTS = [0x111111, 0xf5f5f5, 0x22d3ee, 0xf97316, 0xa3e635, 0xef4444];
+  const hash = (s) => { let h = 2166136261; for (const ch of String(s)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
+  function ballTexture(T) {
+    const c = document.createElement('canvas'); c.width = 256; c.height = 128;
+    const g = c.getContext('2d'); g.fillStyle = '#f8fafc'; g.fillRect(0, 0, 256, 128);
+    g.fillStyle = '#111827';
+    for (let i = 0; i < 6; i++) for (let j = 0; j < 3; j++) { const x = i * 44 + (j % 2) * 22 + 10, y = j * 44 + 20; g.beginPath(); for (let k = 0; k < 5; k++) { const a = (k / 5) * Math.PI * 2 - Math.PI / 2; g.lineTo(x + Math.cos(a) * 10, y + Math.sin(a) * 10); } g.fill(); }
+    return new T.CanvasTexture(c);
+  }
+  // Builds jointed, kit-coloured human figures. Forward is +X, up is +Y.
+  class HumanKit {
+    constructor(T, cols) {
+      this.T = T; this.cols = cols;
+      const limb = (len, r1, r2, seg = 10) => { const g = new T.CylinderGeometry(r1, r2, len, seg); g.translate(0, -len / 2, 0); return g; };
+      const torsoPts = [[0.13, 0], [0.145, 0.08], [0.16, 0.2], [0.185, 0.34], [0.19, 0.42], [0.15, 0.49], [0.06, 0.53]].map(([x, y]) => new T.Vector2(x, y));
+      const hair = new T.SphereGeometry(0.118, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.5);
+      const hairLong = new T.SphereGeometry(0.122, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.68);
+      this.g = {
+        torso: new T.LatheGeometry(torsoPts, 18), pelvis: new T.CylinderGeometry(0.165, 0.17, 0.2, 16),
+        neck: new T.CylinderGeometry(0.055, 0.062, 0.1, 10), shoulder: new T.SphereGeometry(0.066, 12, 10), head: new T.SphereGeometry(0.105, 20, 16),
+        hair, hairLong, afro: new T.SphereGeometry(0.15, 16, 12),
+        ear: new T.SphereGeometry(0.022, 8, 6), eye: new T.SphereGeometry(0.012, 6, 5), nose: new T.ConeGeometry(0.018, 0.045, 6),
+        sleeve: limb(0.15, 0.058, 0.052), upper: limb(0.28, 0.046, 0.04), fore: limb(0.25, 0.038, 0.03), hand: new T.SphereGeometry(0.042, 10, 8),
+        shortLeg: limb(0.2, 0.09, 0.083), thigh: limb(0.43, 0.075, 0.056), shin: limb(0.42, 0.056, 0.04), knee: new T.SphereGeometry(0.058, 10, 8),
+        boot: new T.BoxGeometry(0.24, 0.07, 0.09), num: new T.PlaneGeometry(0.24, 0.24),
+      };
+      this.g.boot.translate(0.05, 0, 0);
+      this.mats = {};
+    }
+    mat(key, color, rough = 0.75, extra) {
+      if (!this.mats[key]) this.mats[key] = new this.T.MeshStandardMaterial({ color, roughness: rough, metalness: 0, ...(extra || {}) });
+      return this.mats[key];
+    }
+    numberMat(side, num, kitColor) {
+      const key = `n${side}-${num}`;
+      if (this.mats[key]) return this.mats[key];
+      const c = document.createElement('canvas'); c.width = c.height = 128;
+      const g = c.getContext('2d');
+      const light = kitColor.r * 0.3 + kitColor.g * 0.59 + kitColor.b * 0.11 > 0.55;
+      g.font = '800 92px Inter, Arial, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.lineWidth = 8; g.strokeStyle = light ? 'rgba(255,255,255,.5)' : 'rgba(0,0,0,.45)'; g.strokeText(String(num), 64, 68);
+      g.fillStyle = light ? '#111827' : '#ffffff'; g.fillText(String(num), 64, 68);
+      return (this.mats[key] = new this.T.MeshStandardMaterial({ map: new this.T.CanvasTexture(c), transparent: true, roughness: 0.8 }));
+    }
+    build(p) {
+      const T = this.T, g = this.g, c = this.cols[p.side], h = hash(p.pid || p.name);
+      const shirtC = p.isGK ? c.gk : c.kit;
+      const shirt = this.mat(`shirt${p.side}${p.isGK ? 'gk' : ''}`, shirtC, 0.8);
+      const shorts = this.mat(`shorts${p.side}${p.isGK ? 'gk' : ''}`, p.isGK ? new T.Color(0x1f2937) : c.shorts, 0.8);
+      const socks = this.mat(`socks${p.side}${p.isGK ? 'gk' : ''}`, p.isGK ? shirtC : c.socks, 0.85);
+      const skin = this.mat(`skin${h % SKIN.length}`, SKIN[h % SKIN.length], 0.6);
+      const hairM = this.mat(`hair${(h >> 3) % HAIR.length}`, HAIR[(h >> 3) % HAIR.length], 0.9);
+      const boot = this.mat(`boot${(h >> 6) % BOOTS.length}`, BOOTS[(h >> 6) % BOOTS.length], 0.4);
+      const glove = this.mat('glove', 0xf8fafc, 0.6);
+      const dark = this.mat('eye', 0x111111, 0.4);
+      const mesh = (geo, m, parent, x = 0, y = 0, z = 0) => { const o = new T.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; parent.add(o); return o; };
+      const root = new T.Group();
+      const scale = (p.isGK ? 1.04 : 0.95) + ((h >> 9) % 100) / 1000;
+      root.scale.setScalar(scale);
+      const body = new T.Group(); root.add(body);
+      // Hips, shorts and torso
+      const pelvis = mesh(g.pelvis, shorts, body, 0, 0.93, 0); pelvis.scale.set(0.8, 1, 1.12);
+      const torso = mesh(g.torso, shirt, body, 0, 1.0, 0); torso.scale.set(0.66, 1, 1.05);
+      const num = new T.Mesh(g.num, this.numberMat(p.side, p.num || 0, shirtC)); num.position.set(-0.128, 1.3, 0); num.rotation.y = -Math.PI / 2; body.add(num);
+      mesh(g.neck, skin, body, 0, 1.55, 0);
+      // Head with face and hair
+      const head = new T.Group(); head.position.set(0.012, 1.675, 0); body.add(head);
+      const skull = mesh(g.head, skin, head); skull.scale.set(0.95, 1.12, 0.88);
+      mesh(g.ear, skin, head, -0.005, 0, 0.093); mesh(g.ear, skin, head, -0.005, 0, -0.093);
+      mesh(g.eye, dark, head, 0.088, 0.022, 0.034); mesh(g.eye, dark, head, 0.088, 0.022, -0.034);
+      const nose = mesh(g.nose, skin, head, 0.1, -0.005, 0); nose.rotation.z = -Math.PI / 2;
+      const style = (h >> 12) % 6;
+      if (style === 1) { const hr = mesh(g.hairLong, hairM, head, -0.01, 0.0, 0); hr.scale.set(1.02, 1.12, 0.95); }
+      else if (style === 2) { const hr = mesh(g.afro, hairM, head, -0.02, 0.05, 0); hr.scale.set(0.95, 0.8, 0.9); }
+      else if (style !== 3) { const hr = mesh(g.hair, hairM, head, -0.012, 0.018, 0); hr.scale.set(1.0, 0.95, 0.93); } // style 3: shaved
+      // Arms: shoulder -> elbow -> hand
+      const arms = [];
+      for (const s of [1, -1]) {
+        const sh = new T.Group(); sh.position.set(0, 1.45, s * 0.205); body.add(sh);
+        mesh(g.shoulder, shirt, sh, 0, -0.01, 0).scale.set(1, 1, 0.9);
+        mesh(g.sleeve, shirt, sh);
+        mesh(g.upper, skin, sh);
+        const el = new T.Group(); el.position.y = -0.28; sh.add(el);
+        mesh(g.fore, skin, el);
+        mesh(g.hand, p.isGK ? glove : skin, el, 0, -0.27, 0).scale.set(p.isGK ? 1.3 : 1, 1, p.isGK ? 1.3 : 1);
+        arms.push({ sh, el, s });
+      }
+      // Legs: hip -> knee -> boot
+      const legs = [];
+      for (const s of [1, -1]) {
+        const hip = new T.Group(); hip.position.set(0, 0.9, s * 0.092); body.add(hip);
+        mesh(g.shortLeg, shorts, hip);
+        mesh(g.thigh, skin, hip);
+        const kn = new T.Group(); kn.position.y = -0.43; hip.add(kn);
+        mesh(g.knee, skin, kn).scale.set(1, 0.8, 1);
+        mesh(g.shin, socks, kn, 0, -0.03, 0);
+        mesh(g.boot, boot, kn, 0, -0.44, 0);
+        legs.push({ hip, kn, s });
+      }
+      const blob = new T.Mesh(new T.CircleGeometry(0.34, 16), new T.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.18 }));
+      blob.rotation.x = -Math.PI / 2; blob.position.y = 0.015; root.add(blob);
+      return { root, body, head, arms, legs };
+    }
+  }
+  // Run cycle, kicks and idle breathing.
+  function animateRig(p, dt) {
+    const r = p.rig, sp = hyp(p.vx, p.vz);
+    const run = Math.min(1, sp / 6.5), walk = Math.min(1, sp / 1.5);
+    const ph = p.run * 1.15;
+    r.body.rotation.z = -(0.04 + 0.2 * run);
+    r.body.position.y = Math.abs(Math.sin(ph)) * 0.05 * run - 0.02 * run;
+    r.head.rotation.z = 0.12 * run;
+    r.legs.forEach((L, i) => {
+      const o = ph + (i ? Math.PI : 0), amp = 0.25 * walk + 0.55 * run;
+      L.hip.rotation.z = Math.sin(o) * amp;
+      L.kn.rotation.z = -(0.08 + (0.25 * walk + 0.95 * run) * Math.max(0, Math.sin(o + 1.9)));
+    });
+    r.arms.forEach((A, i) => {
+      const o = ph + (i ? 0 : Math.PI), amp = 0.25 * walk + 0.5 * run;
+      A.sh.rotation.z = Math.sin(o) * amp;
+      A.sh.rotation.x = A.s * (0.1 + 0.05 * run);
+      A.el.rotation.z = 0.25 + 1.1 * run;
+    });
+    if (!sp || sp < 0.2) { const br = Math.sin(performance.now() / 600 + (p.num || 0)) * 0.02; r.body.position.y = br * 0.3; r.arms.forEach((A) => { A.sh.rotation.z = br; A.el.rotation.z = 0.2; }); }
+    if (p.kickT > 0) {
+      // Right leg: wind up, then strike through the ball.
+      const t = 1 - p.kickT / 0.32, L = r.legs[0];
+      L.hip.rotation.z = t < 0.35 ? -0.9 * (t / 0.35) : -0.9 + 2.1 * Math.min(1, (t - 0.35) / 0.45);
+      L.kn.rotation.z = t < 0.35 ? -1.3 * (t / 0.35) : -1.3 * Math.max(0, 1 - (t - 0.35) / 0.3);
+      r.arms[1].sh.rotation.x = -0.6; r.arms[0].sh.rotation.x = 0.5;
+      r.body.rotation.z = 0.08;
+    }
+  }
+
   class Match {
     constructor(cfg, root) {
       this.cfg = cfg; this.root = root;
@@ -106,14 +247,20 @@
       const stage = this.root.querySelector('.m3d-stage');
       const r = this.renderer = new T.WebGLRenderer({ antialias: true });
       r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      r.shadowMap.enabled = true; r.shadowMap.type = T.PCFSoftShadowMap;
       stage.appendChild(r.domElement);
       const scene = this.scene = new T.Scene();
       scene.background = new T.Color(0x0a1410);
       scene.fog = new T.Fog(0x0a1410, 90, 190);
       this.cam = new T.PerspectiveCamera(42, 1, 0.5, 400);
       this.cam.position.set(0, 30, 50);
-      scene.add(new T.HemisphereLight(0xdfefff, 0x1b3a22, 0.75));
-      const sun = new T.DirectionalLight(0xffffff, 0.75); sun.position.set(-30, 60, 40); scene.add(sun);
+      scene.add(new T.HemisphereLight(0xe8f1ff, 0x284a2e, 0.7));
+      scene.add(new T.AmbientLight(0xffffff, 0.15));
+      const sun = new T.DirectionalLight(0xfff6e8, 1.0); sun.position.set(-25, 60, 35);
+      sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+      Object.assign(sun.shadow.camera, { left: -62, right: 62, top: 42, bottom: -42, near: 10, far: 150 });
+      sun.shadow.bias = -0.0005; sun.shadow.radius = 3;
+      scene.add(sun);
 
       // Pitch drawn on a canvas texture.
       const cv = document.createElement('canvas'); cv.width = 1260; cv.height = 840;
@@ -133,7 +280,7 @@
       }
       const tex = new T.CanvasTexture(cv); tex.anisotropy = 4;
       const pitch = new T.Mesh(new T.PlaneGeometry(126, 84), new T.MeshLambertMaterial({ map: tex }));
-      pitch.rotation.x = -Math.PI / 2; scene.add(pitch);
+      pitch.rotation.x = -Math.PI / 2; pitch.receiveShadow = true; scene.add(pitch);
       const outer = new T.Mesh(new T.PlaneGeometry(260, 200), new T.MeshLambertMaterial({ color: 0x14361f }));
       outer.rotation.x = -Math.PI / 2; outer.position.y = -0.02; scene.add(outer);
       // Stands
@@ -152,31 +299,17 @@
         const bar = new T.Mesh(new T.CylinderGeometry(0.07, 0.07, GW * 2, 8), post); bar.rotation.x = Math.PI / 2; bar.position.set(gx, GH, 0); scene.add(bar);
         const n = new T.Mesh(new T.BoxGeometry(2, GH, GW * 2, 3, 4, 10), net); n.position.set(gx + s * 1, GH / 2, 0); scene.add(n);
       }
-      // Players
-      const skin = new T.MeshLambertMaterial({ color: 0xd9a47a });
-      const dark = new T.MeshLambertMaterial({ color: 0x111418 });
-      const shadowMat = new T.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 });
+      // Players: procedural footballers with jointed limbs.
+      const shadowMat = new T.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3 });
       const cols = this.teamColors();
+      const kit = new HumanKit(T, cols);
       for (const p of this.players) {
-        const grp = new T.Group();
-        const kit = new T.MeshLambertMaterial({ color: p.isGK ? cols[p.side].gk : cols[p.side].kit });
-        const shorts = new T.MeshLambertMaterial({ color: cols[p.side].shorts });
-        const body = new T.Mesh(new T.CylinderGeometry(0.3, 0.26, 0.75, 10), kit); body.position.y = 1.2; grp.add(body);
-        const sh = new T.Mesh(new T.CylinderGeometry(0.27, 0.27, 0.28, 10), shorts); sh.position.y = 0.72; grp.add(sh);
-        const head = new T.Mesh(new T.SphereGeometry(0.19, 12, 10), skin); head.position.y = 1.78; grp.add(head);
-        const legs = [];
-        for (const lz of [-0.12, 0.12]) {
-          const leg = new T.Group(); leg.position.set(0, 0.6, lz);
-          const l = new T.Mesh(new T.CylinderGeometry(0.08, 0.07, 0.6, 6), skin); l.position.y = -0.3; leg.add(l);
-          const boot = new T.Mesh(new T.BoxGeometry(0.22, 0.08, 0.1), dark); boot.position.set(0.04, -0.6, 0); leg.add(boot);
-          grp.add(leg); legs.push(leg);
-        }
-        const shadow = new T.Mesh(new T.CircleGeometry(0.45, 14), shadowMat); shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.02;
-        scene.add(shadow);
-        scene.add(grp);
-        p.mesh = grp; p.legs = legs; p.shadow = shadow;
+        const h = kit.build(p);
+        scene.add(h.root);
+        Object.assign(p, { mesh: h.root, rig: h });
       }
-      const ball = new T.Mesh(new T.SphereGeometry(BR * 1.6, 16, 12), new T.MeshLambertMaterial({ color: 0xffffff, emissive: 0x333333 }));
+      const ball = new T.Mesh(new T.SphereGeometry(BR, 20, 14), new T.MeshStandardMaterial({ map: ballTexture(T), roughness: 0.45 }));
+      ball.castShadow = true;
       scene.add(ball); this.ballMesh = ball;
       const bs = new T.Mesh(new T.CircleGeometry(0.3, 12), shadowMat); bs.rotation.x = -Math.PI / 2; bs.position.y = 0.021; scene.add(bs); this.ballShadow = bs;
       const ring = new T.Mesh(new T.RingGeometry(0.6, 0.85, 24), new T.MeshBasicMaterial({ color: 0xfacc15, side: T.DoubleSide }));
@@ -198,6 +331,7 @@
         return {
           kit: away ? new T.Color(0xf1f5f9) : new T.Color().setHSL(h, 0.7, 0.45),
           shorts: away ? new T.Color(0x1f2937) : new T.Color().setHSL(h, 0.5, i ? 0.85 : 0.18),
+          socks: away ? new T.Color(0xf1f5f9) : new T.Color().setHSL(h, 0.7, i ? 0.85 : 0.4),
           gk: new T.Color(i ? 0xf472b6 : 0xfacc15),
           css: away ? '#f1f5f9' : `hsl(${Math.round(h * 360)} 70% 45%)`,
         };
@@ -235,8 +369,8 @@
       q('.m3d-t0').innerHTML = `<i style="background:${cols[0].css}"></i>${esc(t[0].short || t[0].name)}`;
       q('.m3d-t1').innerHTML = `${esc(t[1].short || t[1].name)}<i style="background:${cols[1].css}"></i>`;
       q('.m3d-keys').innerHTML = this.teamMode
-        ? '<b>WASD</b> move · <b>Shift</b> sprint · <b>Space</b> shoot (hold) / tackle · <b>E</b> pass · <b>Q</b> through ball / switch player · <b>R</b> lob / cross · <b>Esc</b> pause'
-        : '<b>WASD</b> move · <b>Shift</b> sprint · <b>Space</b> shoot (hold) / tackle · <b>E</b> pass / call for the ball · <b>Q</b> through ball · <b>R</b> lob / cross · <b>Esc</b> pause';
+        ? '<b>WASD</b> move · <b>Shift</b> sprint · <b>Space</b> shoot (hold) / tackle · <b>E</b> pass · <b>Q</b> through ball / switch player · <b>R</b> lob / cross · <b>C</b> camera · <b>Esc</b> pause'
+        : '<b>WASD</b> move · <b>Shift</b> sprint · <b>Space</b> shoot (hold) / tackle · <b>E</b> pass / call for the ball · <b>Q</b> through ball · <b>R</b> lob / cross · <b>C</b> camera · <b>Esc</b> pause';
       this.hud = { sc: q('.m3d-sc'), clock: q('.m3d-clock'), msg: q('.m3d-msg'), power: q('.m3d-power'), bar: q('.m3d-power i'), radar: q('.m3d-radar'), menu: q('.m3d-menu') };
       this.cols = cols;
     }
@@ -244,6 +378,7 @@
       this.kd = (e) => {
         const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
         if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(k) || 'wasdeqr'.includes(k)) e.preventDefault();
+        if (k === 'c' && !e.repeat) { this.camMode = ((this.camMode || 0) + 1) % CAMS.length; this.flash(`Camera: ${CAMS[this.camMode].name}`, 0.8); return; }
         if (k === 'Escape' || k === 'p') { if (!this.over) this.paused ? this.resume() : this.showMenu('pause'); return; }
         this.keys[k] = true;
       };
@@ -341,7 +476,7 @@
     }
 
     /* ---------------- kicking ---------------- */
-    release(p) { const b = this.ball; b.owner = null; p.cd = 0.35; b.last = p; b.lastSide = p.side; }
+    release(p) { const b = this.ball; b.owner = null; p.cd = 0.35; b.last = p; b.lastSide = p.side; p.kickT = 0.32; }
     kickTo(p, tx, tz, speed, loft, errSd) {
       const b = this.ball;
       this.release(p);
@@ -732,12 +867,14 @@
       const b = this.ball, T = this.T;
       for (const p of this.players) {
         p.mesh.position.set(p.x, 0, p.z);
-        p.mesh.rotation.y = -p.face;
-        const sp = hyp(p.vx, p.vz), sw = Math.sin(p.run * 2.4) * Math.min(0.8, sp / 7);
-        p.legs[0].rotation.z = sw; p.legs[1].rotation.z = -sw;
-        p.shadow.position.set(p.x, 0.02, p.z);
+        // Turn smoothly towards the facing direction.
+        let dr = -p.face - (p.rotY ?? -p.face); dr = Math.atan2(Math.sin(dr), Math.cos(dr));
+        p.rotY = (p.rotY ?? -p.face) + dr * Math.min(1, dt * 12);
+        p.mesh.rotation.y = p.rotY;
+        if (p.kickT > 0) p.kickT -= dt;
+        animateRig(p, dt);
       }
-      this.ballMesh.position.set(b.x, b.y + BR * 0.6, b.z);
+      this.ballMesh.position.set(b.x, b.y, b.z);
       this.ballMesh.rotation.z -= hyp(b.vx, b.vz) * dt * 3;
       this.ballShadow.position.set(b.x, 0.021, b.z);
       const c = this.ctrl;
@@ -748,12 +885,14 @@
         this.setLabel(c.name.split(' ').slice(-1)[0]);
       }
       // Broadcast camera: follows the ball from the near touchline.
-      const tx = clamp(b.x * 0.9, -PL + 10, PL - 10), tz = clamp(b.z * 0.45, -12, 12);
+      const mode = CAMS[this.camMode || 0];
+      const focus = mode.follow && this.ctrl ? { x: (this.ctrl.x * 2 + b.x) / 3, z: (this.ctrl.z * 2 + b.z) / 3 } : b;
+      const tx = clamp(focus.x * mode.fx, -PL + mode.edge, PL - mode.edge), tz = clamp(focus.z * mode.fz, -mode.zc, mode.zc);
       const cam = this.cam, k = Math.min(1, dt * 3);
       this.cx = (this.cx ?? tx) + (tx - (this.cx ?? tx)) * k;
       this.cz = (this.cz ?? tz) + (tz - (this.cz ?? tz)) * k;
-      cam.position.set(this.cx, 21, this.cz + 31);
-      cam.lookAt(this.cx, 0, this.cz - 2);
+      cam.position.set(this.cx, mode.h, this.cz + mode.d);
+      cam.lookAt(this.cx, mode.ly, this.cz - 2);
       this.renderer.render(this.scene, cam);
       // HUD
       this.hud.sc.textContent = `${this.score[0]} - ${this.score[1]}`;

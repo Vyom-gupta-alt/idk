@@ -1362,13 +1362,13 @@
     const slots = FORMATIONS[side.formation];
     return {
       name: side.name, short: side.short, hue: clubHue(S.clubs[side.clubId]),
-      players: side.xi.map((x) => {
+      players: side.xi.map((x, i) => {
         const p = S.players[x.pid], f = slots[x.si] || [x.slot, 50, 50];
         const adj = eff(p, x.slot) - p.ovr - clamp(p.form || 0, -2, 2); // out-of-position penalty
         const a = (k) => clamp(attr(p, k) + adj, 20, 99);
         const gk = p.pos === 'GK';
         return {
-          pid: p.id, name: p.name, slot: x.slot, fx: (100 - f[2]) / 100, fz: (f[1] - 50) / 50, ovr: p.ovr,
+          pid: p.id, name: p.name, num: i + 1, slot: x.slot, fx: (100 - f[2]) / 100, fz: (f[1] - 50) / 50, ovr: p.ovr,
           pac: gk ? a('SPD') : a('PAC'), sho: gk ? 35 : a('SHO'), pas: gk ? a('KIC') : a('PAS'), dri: gk ? 40 : a('DRI'), def: gk ? 45 : a('DEF'), phy: gk ? 60 : a('PHY'),
           gk: x.slot === 'GK' ? (gk ? Math.round((attr(p, 'DIV') + attr(p, 'REF') + attr(p, 'HAN') + attr(p, 'POS')) / 4) : 35) : 30,
         };

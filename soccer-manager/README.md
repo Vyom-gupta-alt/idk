@@ -21,7 +21,8 @@ On the Match tab, **🎮 Play Match (3D)** puts you on the pitch in a real-time 
 - **Controls:** WASD / arrows move, **Shift** sprint, **Space** hold to charge a shot and release to shoot (W/S aims far/near post) or tackle without the ball, **E** pass, **Q** through ball (or switch player when defending), **R** lob / cross, **Esc** pause.
 - **Manager career:** you control the whole team and switch players. **Player career:** you control only yourself, and **E** calls for the ball.
 - Player ratings and attributes drive the game: pace sets speed, shooting sets accuracy, passing sets pass error, defending wins tackles, and keeper ratings decide saves. Out-of-position players are weaker.
-- Throw-ins, corners, goal kicks, half-time, a broadcast camera, a radar minimap, and penalties for level knockout ties.
+- Human-looking players with jointed arms and legs, running and kicking animations, kits with shirt numbers, varied skin tones, hairstyles and heights, and real-time shadows. Press **C** to switch camera (Broadcast, Close, Wide).
+- Throw-ins, corners, goal kicks, half-time, a radar minimap, and penalties for level knockout ties.
 - Match length is 3, 5, 8 or 12 real minutes. You can end a match early and keep the current score.
 
 ## Features
