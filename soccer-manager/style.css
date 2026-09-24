@@ -481,3 +481,13 @@ label.check { display: inline-flex; align-items: center; gap: .4rem; font-size: 
 .grp h4 { margin: .4rem 0 .2rem; }
 .warn-row td { background: rgba(249,115,22,.07); }
 .small-bar { width: 70px; margin: 0 auto; }
+
+/* v6: create a club */
+.create-card { border-style: dashed; }
+.create-plus { --h: 210; font-size: 1.4rem; background: var(--card2); color: var(--accent); border: 1px dashed currentColor; }
+.create-club { margin-top: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg2); }
+.create-club h3 { margin: 0 0 .75rem; }
+.cc-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .75rem 1rem; }
+.cc-form label { display: flex; flex-direction: column; gap: .3rem; font-size: .85rem; color: var(--muted); }
+.cc-form .input { width: 100%; }
+.cc-form input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }

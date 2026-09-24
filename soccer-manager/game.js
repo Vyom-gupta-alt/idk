@@ -1169,6 +1169,7 @@
     S = deepClone(W);
     finalizeWorld(S);
     invalidate();
+    if (opts.custom) clubId = createClub(clubId, opts.custom);
     for (const cl of Object.values(S.clubs)) if (isClub(cl) && cl.pids.length) cl.formation = pickFormation(cl);
     invalidate();
     const club = S.clubs[clubId];
@@ -1202,11 +1203,33 @@
     S.career.lineup = bestXI(club.pids, S.career.formation);
     if (!pid) academySetup();
     S.career.wageBudget = niceRound(wageBill() * 1.12);
+    if (club.custom) news(`🏗️ ${club.name} are founded! ${club.stadium} is ready and the ${S.leagues[club.leagueId].name} awaits.`, 'good');
     if (pid) news(`✍️ ${S.career.manager} (17, ${opts.pos || 'ST'}) signs a first professional contract with ${club.name}. Play well and your OVR will rise.`, 'good');
     else news(`${S.career.manager} is appointed manager of ${club.name}. Transfer budget ${money(club.budget)}, wage budget ${money(S.career.wageBudget)} per week.`, 'info');
     const eu = euroOf(clubId);
     if (eu) news(`${club.name} will play in the ${eu.name} this season.`, 'good');
     save();
+  }
+
+  /* --- Create a club: your own club takes over an existing league place --- */
+  const CUSTOM_STRENGTH = { underdog: ['Underdog', -6], mid: ['Mid-table', -2], contender: ['Contender', 2], giant: ['Giant', 6] };
+  const CUSTOM_BUDGET = { low: ['Shoestring', 0.4], normal: ['Normal', 1], rich: ['Rich owner', 2.5], mega: ['Oil money', 6] };
+  function createClub(replaceId, o) {
+    const club = S.clubs[replaceId], L = S.leagues[club.leagueId];
+    // The replaced club's players become free agents.
+    for (const id of club.pids) { const p = S.players[id]; p.clubId = 'FA'; S.clubs.FA.pids.push(id); }
+    const others = L.clubIds.filter((id) => id !== replaceId).map((id) => S.clubs[id].level || 66);
+    const lvl = clamp(Math.round(avg(others)) + (CUSTOM_STRENGTH[o.strength] || CUSTOM_STRENGTH.mid)[1], 50, 88);
+    Object.assign(club, {
+      name: o.name, short: o.short, hue: o.hue || 360, custom: 1, pids: [], level: lvl, budget: 0, formation: null,
+      stadium: o.stadium || `${o.name} Park`,
+    });
+    fillSquad(S, club, 24);
+    for (const id of club.pids) { const p = S.players[id]; delete p.nat; assignNat(S, p); }
+    club.level = computeLevel(S, club);
+    club.budget = niceRound(clamp(initialBudget(S, club) * (CUSTOM_BUDGET[o.budget] || CUSTOM_BUDGET.normal)[1], 2e6, 600e6));
+    invalidate();
+    return replaceId;
   }
 
   function news(text, type = 'info') {
@@ -2548,7 +2571,7 @@
   const posBadge = (p) => `<span class="pos pos-${LINE[p] || 'MID'}">${p}</span>`;
   const crest = (club, size = '') => {
     if (!club) return '';
-    const hue = [...club.id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 360, 7);
+    const hue = club.hue ?? [...club.id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 360, 7);
     return `<span class="crest ${size}" style="--h:${hue}">${esc((club.short || club.name).slice(0, 4))}</span>`;
   };
   const statusIcons = (p) => (p.inj > 0 ? `<span class="tag bad" title="Injured for ${p.inj} match(es)">INJ ${p.inj}</span>` : '') + (p.sus > 0 ? '<span class="tag warn" title="Suspended">SUS</span>' : '') + (p.away ? '<span class="tag intl" title="Away on international duty">INTL</span>' : '');
@@ -2574,6 +2597,22 @@
   /* ------------------------------------------------------------------ *
    * Start screen
    * ------------------------------------------------------------------ */
+  function customDefaults(L) {
+    const cu = (ui.custom = ui.custom || { name: '', short: '', stadium: '', hue: 210, strength: 'mid', budget: 'normal', replace: null });
+    if (L && !L.clubIds.includes(cu.replace)) cu.replace = L.clubIds.slice().sort((a, b) => clubRating(a) - clubRating(b))[0];
+    return cu;
+  }
+  function readCustom() {
+    const cu = ui.custom;
+    if (!cu || !$('#cc-name')) return;
+    cu.name = $('#cc-name').value.trim();
+    cu.short = $('#cc-short').value.trim().toUpperCase();
+    cu.stadium = $('#cc-stadium').value.trim();
+    cu.hue = +$('#cc-hue').value;
+    cu.strength = $('#cc-strength').value;
+    cu.budget = $('#cc-budget')?.value || cu.budget;
+    cu.replace = $('#cc-replace').value;
+  }
   function renderStart() {
     clearTimers();
     const sc = loadMeta();
@@ -2584,14 +2623,34 @@
     invalidate();
     if (selL) {
       const clubs = selL.clubIds.map((id) => W.clubs[id]).map((c) => ({ c, r: clubRating(c.id) })).sort((a, b) => b.r - a.r);
+      const cu = customDefaults(selL);
       clubsHtml = `<h2 class="step"><span>4</span> Choose your club</h2>
-        <div class="club-grid">${clubs.map(({ c, r }) => `
+        <div class="club-grid">
+          <button class="club-card create-card ${ui.startClub === 'NEW' ? 'sel' : ''}" data-act="start-club" data-id="NEW">
+            <span class="crest lg create-plus">＋</span>
+            <span class="cc-name">Create a club</span>
+            <span class="cc-meta muted small">Your name, colours and squad</span>
+          </button>${clubs.map(({ c, r }) => `
           <button class="club-card ${ui.startClub === c.id ? 'sel' : ''}" data-act="start-club" data-id="${c.id}">
             ${crest(c, 'lg')}
             <span class="cc-name">${esc(c.name)}</span>
             <span class="cc-meta">${ovrBadge(r)} ${pm ? '' : `<span class="muted">Budget</span> ${money(c.budget)}`}</span>
             <span class="cc-stars">${stars(r)}</span>
-          </button>`).join('')}</div>`;
+          </button>`).join('')}</div>
+        ${ui.startClub === 'NEW' ? `
+          <div class="create-club">
+            <h3>🏗️ Create your club</h3>
+            <div class="cc-form">
+              <label>Club name<input class="input" id="cc-name" maxlength="28" placeholder="e.g. Riverside United" value="${esc(cu.name)}"></label>
+              <label>Short name<input class="input" id="cc-short" maxlength="4" placeholder="RIV" value="${esc(cu.short)}"></label>
+              <label>Stadium<input class="input" id="cc-stadium" maxlength="32" placeholder="${esc((cu.name || 'Club') + ' Park')}" value="${esc(cu.stadium)}"></label>
+              <label>Badge colour<span class="row gap"><input type="range" id="cc-hue" min="0" max="359" value="${cu.hue}"><span id="cc-preview">${crest({ id: 'NEW', hue: cu.hue, short: cu.short || 'NEW' }, 'lg')}</span></span></label>
+              <label>Squad strength<select class="input" id="cc-strength">${Object.entries(CUSTOM_STRENGTH).map(([k, [lab, d]]) => `<option value="${k}" ${cu.strength === k ? 'selected' : ''}>${lab} (${d > 0 ? "+" : ""}${d} OVR)</option>`).join('')}</select></label>
+              ${pm ? '' : `<label>Finances<select class="input" id="cc-budget">${Object.entries(CUSTOM_BUDGET).map(([k, [lab, m]]) => `<option value="${k}" ${cu.budget === k ? 'selected' : ''}>${lab} (×${m} budget)</option>`).join('')}</select></label>`}
+              <label>Takes the place of<select class="input" id="cc-replace">${clubs.slice().reverse().map(({ c }) => `<option value="${c.id}" ${cu.replace === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+            </div>
+            <p class="muted small">Your club gets a generated squad built around the strength you pick. The club it replaces leaves the league, and its players become free agents you can try to sign.</p>
+          </div>` : ''}`;
     }
     const leagueCards = (tier) => W.leagueOrder.map((id) => W.leagues[id]).filter((l) => (l.tier || 1) === tier).map((l) => `
       <button class="league-card ${ui.startLeague === l.id ? 'sel' : ''}" data-act="start-league" data-id="${l.id}">
@@ -2635,7 +2694,7 @@
           ${clubsHtml}
           <div class="start-actions">
             <button class="btn ghost" data-act="open-import">Import FC 26 ratings…</button>
-            <button class="btn primary big" data-act="start-career" ${ui.startClub ? '' : 'disabled'}>${pm ? 'Start player career' : 'Start manager career'}${ui.startClub ? ` ${pm ? 'at' : 'with'} ${esc(W.clubs[ui.startClub].name)}` : ''} →</button>
+            <button class="btn primary big" data-act="start-career" ${ui.startClub ? '' : 'disabled'}>${pm ? 'Start player career' : 'Start manager career'}${ui.startClub && ui.startClub !== 'NEW' ? ` ${pm ? 'at' : 'with'} ${esc(W.clubs[ui.startClub].name)}` : ui.startClub ? ' with your new club' : ''} →</button>
           </div>
         </div>
         <p class="muted small center">14 leagues (top flights and second divisions), 7 domestic cups, the Champions League, Europa League and Conference League, with 3 clubs promoted and relegated each season. Top-flight ratings are FC 26-style estimates. Second-division squads are generated.</p>
@@ -3948,18 +4007,28 @@
    * Event handling
    * ------------------------------------------------------------------ */
   const ACTIONS = {
-    'start-league': (id) => { ui.startLeague = id; ui.startClub = null; ui.managerName = $('#mgr-name')?.value || ui.managerName; ui.startPos = $('#start-pos')?.value || ui.startPos; renderStart(); },
-    'start-club': (id) => { ui.startClub = id; ui.managerName = $('#mgr-name')?.value || ui.managerName; ui.startPos = $('#start-pos')?.value || ui.startPos; renderStart(); },
-    'start-mode': (id) => { ui.startMode = id; ui.managerName = $('#mgr-name')?.value || ui.managerName; renderStart(); },
+    'start-league': (id) => { readCustom(); ui.startLeague = id; ui.startClub = null; ui.managerName = $('#mgr-name')?.value || ui.managerName; ui.startPos = $('#start-pos')?.value || ui.startPos; renderStart(); },
+    'start-club': (id) => { readCustom(); ui.startClub = id; ui.managerName = $('#mgr-name')?.value || ui.managerName; ui.startPos = $('#start-pos')?.value || ui.startPos; renderStart(); },
+    'start-mode': (id) => { readCustom(); ui.startMode = id; ui.managerName = $('#mgr-name')?.value || ui.managerName; renderStart(); },
     'start-career': () => {
       if (!ui.startClub) return;
+      let custom = null, clubId = ui.startClub;
+      if (clubId === 'NEW') {
+        readCustom();
+        const cu = ui.custom;
+        if (!cu.name) { toast('Give your club a name.', 'bad'); $('#cc-name')?.focus(); return; }
+        if (Object.values(W.clubs).some((cl) => isClub(cl) && cl.id !== cu.replace && norm(cl.name) === norm(cu.name))) return toast('A club with that name already exists.', 'bad');
+        const short = (cu.short || cu.name.replace(/[^A-Za-z]/g, '').slice(0, 3) || 'NEW').toUpperCase().slice(0, 4);
+        custom = { name: cu.name, short, stadium: cu.stadium, hue: cu.hue, strength: cu.strength, budget: cu.budget };
+        clubId = cu.replace;
+      }
       const saved = loadMeta();
       const pm = ui.startMode === 'player';
       const name = ($('#mgr-name')?.value || '').trim() || (pm ? 'Alex Hunter' : 'The Gaffer');
       const pos = $('#start-pos')?.value || 'ST';
       const role = $('#start-role')?.value || defaultRole(pos);
       const nat = $('#start-nat')?.value || 'ENG';
-      const begin = () => { startCareer(ui.startClub, name, { mode: pm ? 'player' : 'manager', pos, role, nat }); view = 'home'; render(); };
+      const begin = () => { startCareer(clubId, name, { mode: pm ? 'player' : 'manager', pos, role, nat, custom }); view = 'home'; render(); };
       if (saved) askConfirm('Starting a new career will overwrite your saved career.', begin, 'Start new career');
       else begin();
     },
@@ -4149,6 +4218,11 @@
   let qTimer = null;
   document.addEventListener('input', (e) => {
     const el = e.target;
+    if (el.id === 'cc-hue' || el.id === 'cc-short') {
+      const box = $('#cc-preview');
+      if (box) box.innerHTML = crest({ id: 'NEW', hue: +$('#cc-hue').value, short: $('#cc-short').value.toUpperCase() || 'NEW' }, 'lg');
+      return;
+    }
     if (el.dataset.change && el.dataset.live) {
       CHANGES[el.dataset.change](el.value);
       clearTimeout(qTimer);
