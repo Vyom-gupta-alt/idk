@@ -3724,9 +3724,9 @@
           ${pm ? '' : '<button class="btn ghost" data-act="tab" data-id="squad">Edit lineup</button>'}
         </div>
         <div class="center play-row"><button class="btn primary huge" data-act="simulate">▶ Simulate Match</button>
-          <button class="btn huge play3d" data-act="play3d" title="Play the match yourself in 3D (keyboard)">🎮 Play Match (3D)</button>
+          <button class="btn huge play3d" data-act="play3d" title="Play the match yourself in 3D (keyboard, mouse or controller)">🎮 Play Match (3D)</button>
           <label class="inline small">Match length <select class="input sm" id="len3d" data-change="len3d">${[3, 5, 8, 12].map((n) => `<option value="${n}" ${+(c.len3d || 5) === n ? 'selected' : ''}>${n} min</option>`).join('')}</select></label></div>
-        <p class="center muted small">Play Match puts you on the pitch: <b>WASD</b> move, <b>Shift</b> sprint, <b>Space</b> shoot / tackle, <b>E</b> pass, <b>Q</b> through ball${pm ? '' : ' / switch player'}, <b>R</b> lob / cross. The score you play counts. Needs a keyboard.</p>
+        <p class="center muted small">Play Match puts you on the pitch: <b>WASD</b> move, <b>Shift</b> sprint, <b>Space</b> shoot / tackle, <b>E</b> pass, <b>Q</b> through ball${pm ? '' : ' / switch player'}, <b>R</b> lob / cross${pm ? ', <b>T</b> control the whole team' : ''}. Mouse and 🎮 controllers (Xbox / PlayStation) work too. The score you play counts.</p>
         <div class="grid g2">
           <div><h4>${esc(H.name)} XI</h4>${lineupList(H)}</div>
           <div><h4>${esc(A.name)} XI</h4>${lineupList(A)}</div>
