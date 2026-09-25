@@ -34,6 +34,16 @@ On the Match tab, **🎮 Play Match (3D)** puts you on the pitch in a real-time 
 ## Substitutions while simulating
 When you simulate a match as a manager, a **🔁 Substitution** button sits under the live commentary. It pauses the match so you can pick who comes off and who comes on (up to 5). The sub takes the same position, and the rest of the match is re-simulated from that minute. Everything that already happened stays the same. Once you make a change, the assistant stops making automatic subs for your side. Your bench always keeps room for your two best under-21 prospects, and the minutes they get count towards their appearances and development. With commentary set to Instant, the match is simulated in one go without a chance to sub.
 
+## The board (manager career)
+- **Revenue share:** your transfer budget no longer gets all of the club's revenue. The board releases 10–30% of it, depending on their confidence in you; the rest pays wages and running costs. Money from player sales still comes to you in full.
+- **Objectives:** each season comes with targets set from your squad's strength. These are a league position (win the league, top 4, top half, avoid relegation or win promotion) plus, where relevant, a cup run and a European run. There is also a long-term goal over two to three seasons: win the Champions League, win the league, qualify for the Champions League, establish the club in the top half, or win promotion. Their live status shows in the board card on Home.
+- **Confidence:** results move board confidence during the season, and the end-of-season review adds or removes a lot more. The verdict shows in the season summary and also affects your wage budget. If confidence collapses, during the season or at the review, you are **sacked**. Only smaller clubs will offer you a job, or you can retire.
+- **Asking for money:** the board card has an **Ask the board for transfer funds** button with three sizes of request. The chance of a yes depends on their confidence and falls for bigger requests. Each request costs some confidence either way, and you can only ask once per transfer window.
+
+## AI clubs are smarter
+- Every summer, and to a lesser extent in January, each AI club looks for a real hole in its team, such as a much weaker player in one position or an ageing keeper, and signs a better player for it if it can afford one. Big clubs can take stars from smaller clubs.
+- In January, clubs give new contracts to their most important players before those contracts expire.
+
 ## Wage budget reviews
 At the end of every season the board reviews your wage budget, and the result shows in the season summary:
 - Qualifying for Europe: +15% (Champions League), +8% (Europa League) or +5% (Conference League).
