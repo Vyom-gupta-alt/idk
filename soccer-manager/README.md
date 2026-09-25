@@ -31,6 +31,9 @@ On the Match tab, **🎮 Play Match (3D)** puts you on the pitch in a real-time 
 - Throw-ins, corners, goal kicks, half-time, a radar minimap, and penalties for level knockout ties.
 - Match length is 3, 5, 8 or 12 real minutes. You can end a match early and keep the current score.
 
+## Swap deals
+When you negotiate for a player, you can offer one of your own players as part of the deal, with or without cash. The selling club values him by his market price, his age and whether he is good enough for their team. The player you offer must be willing to join them. If the swap falls a little short, the club tells you how much cash to add. Swaps work even when your squad is full, because one player leaves as another arrives.
+
 ## Features
 - **14 leagues in 7 countries:** Premier League, LaLiga, Serie A, Bundesliga, Ligue 1, Liga Portugal and Eredivisie, with real 2025/26 squads, plus their second divisions: Championship (24 clubs, with midweek rounds), LaLiga Hypermotion, Serie B, 2. Bundesliga, Ligue 2, Liga Portugal 2 and Eerste Divisie. Second-division clubs are real, but their squads are generated.
 - **Promotion & relegation:** the bottom 3 of each top division swap places with the top 3 of the division below every season. Reserve sides (B / Jong) can't be promoted.

@@ -2656,18 +2656,48 @@
     if (!t || t.key !== k) t = c.talks[pid] = { key: k, bids: 0, blocked: false, agreed: 0, counter: 0 };
     return t;
   }
-  // The user's bid for a player. Returns the club's response.
-  function submitBid(pid, amount) {
+  // Swap deals: what the selling club thinks one of your players is worth to them.
+  function swapValue(q, sellerId) {
+    let m = 0.9;
+    const r = clubRating(sellerId);
+    if (q.ovr < r - 8) m = 0.35; else if (q.ovr < r - 4) m = 0.65; // not good enough for their team
+    if (q.age >= 32) m *= 0.7; else if (q.age >= 30) m *= 0.85;
+    if (q.age <= 22 && q.pot - q.ovr >= 6) m *= 1.1;
+    return niceRound(playerValue(q) * m);
+  }
+  // Can this player of yours go the other way in a swap? Returns an error message or null.
+  function swapBlocker(q, p) {
+    const c = C();
+    if (!q || q.clubId !== c.clubId) return 'That player is no longer at your club.';
+    if (q.loan) return `${q.name} is out on loan.`;
+    if (q.pos === 'GK' && p.pos !== 'GK' && S.clubs[c.clubId].pids.filter((id) => S.players[id].pos === 'GK').length <= 1) return 'You cannot swap your last goalkeeper.';
+    if (interest(q, p.clubId).lvl === 0) return `${q.name} does not want to join ${clubName(p.clubId)}.`;
+    return null;
+  }
+  // The user's bid for a player (cash, plus optionally one of your players). Returns the club's response.
+  function submitBid(pid, amount, swapPid) {
     const c = C(), p = S.players[pid];
     const t = talk(pid);
     if (t.blocked) return { status: 'ended', msg: `${clubName(p.clubId)} have ended talks until the next window.` };
     if (amount > S.clubs[c.clubId].budget) return { status: 'error', msg: 'That is more than your transfer budget.' };
+    const q = swapPid ? S.players[swapPid] : null;
+    if (q) { const e = swapBlocker(q, p); if (e) return { status: 'error', msg: e }; }
     const val = clubValuation(p, c.clubId);
+    const sv = q ? swapValue(q, p.clubId) : 0;
     t.bids++;
-    if (amount >= val) { t.agreed = amount; return { status: 'accepted', msg: `${p.clubId === 'FA' ? 'Signing fee agreed' : `${clubName(p.clubId)} accept your offer`} of ${money(amount)}.` }; }
+    if (q) {
+      const total = amount + sv, pay = Math.max(0, val - sv);
+      const worth = `They value ${q.name} at ${money(sv)}.`;
+      if (total >= val) { t.agreed = amount; t.swap = q.id; return { status: 'accepted', msg: `${clubName(p.clubId)} accept the swap: ${q.name}${amount ? ` + ${money(amount)}` : ''} for ${p.name}.` }; }
+      if (total < val * 0.6) { t.blocked = true; return { status: 'ended', msg: `${clubName(p.clubId)} found that swap insulting and ended talks until the next window. ${worth}` }; }
+      if (t.bids >= 3) { t.blocked = true; return { status: 'ended', msg: `After three rejected bids, ${clubName(p.clubId)} have ended talks until the next window.` }; }
+      if (total >= val * 0.85) { t.counter = pay; t.counterSwap = q.id; return { status: 'counter', msg: `${clubName(p.clubId)} would do the swap if you add ${money(pay)}. ${worth}` }; }
+      return { status: 'rejected', msg: `${clubName(p.clubId)} reject the swap. ${worth} (${3 - t.bids} bid${3 - t.bids === 1 ? '' : 's'} left this window)` };
+    }
+    if (amount >= val) { t.agreed = amount; t.swap = null; return { status: 'accepted', msg: `${p.clubId === 'FA' ? 'Signing fee agreed' : `${clubName(p.clubId)} accept your offer`} of ${money(amount)}.` }; }
     if (amount < val * 0.6) { t.blocked = true; return { status: 'ended', msg: `${clubName(p.clubId)} found that offer insulting and ended talks until the next window.` }; }
     if (t.bids >= 3) { t.blocked = true; return { status: 'ended', msg: `After three rejected bids, ${clubName(p.clubId)} have ended talks until the next window.` }; }
-    if (amount >= val * 0.85) { t.counter = val; return { status: 'counter', msg: `${clubName(p.clubId)} reject the offer but would accept ${money(val)}.` }; }
+    if (amount >= val * 0.85) { t.counter = val; t.counterSwap = null; return { status: 'counter', msg: `${clubName(p.clubId)} reject the offer but would accept ${money(val)}.` }; }
     return { status: 'rejected', msg: `${clubName(p.clubId)} reject the offer: it is well below their valuation. (${3 - t.bids} bid${3 - t.bids === 1 ? '' : 's'} left this window)` };
   }
   /* --- Contracts & wage negotiation --- */
@@ -2725,10 +2755,10 @@
     if (ask <= o.max * 1.2) { o.wage = o.max; return { status: 'counter', msg: `${clubName(o.clubId)} come back with their final offer: ${money(o.max)} a week.` }; }
     return { status: 'rejected', msg: `${clubName(o.clubId)} say that is far too much. The offer stays at ${money(o.wage)} a week.` };
   }
-  function signingBlocker(p) {
+  function signingBlocker(p, swap) {
     const c = C(), me = S.clubs[c.clubId];
     if (p.clubId !== 'FA' && !windowInfo().open) return `The transfer window is closed (${windowInfo().label.split('· ')[1] || ''}). Free agents can still be signed.`;
-    if (me.pids.length >= MAX_SQUAD) return `Your squad is full (${MAX_SQUAD} players). Sell or release someone first.`;
+    if (me.pids.length >= MAX_SQUAD && !swap) return `Your squad is full (${MAX_SQUAD} players). Sell or release someone first.`;
     const it = interest(p, c.clubId);
     if (it.lvl === 0) return `${p.name} does not want to join ${me.name}. Bigger clubs, European football or a stronger squad would change his mind.`;
     return null;
@@ -2736,24 +2766,33 @@
   function completeSigning(pid) {
     const c = C(), p = S.players[pid], me = S.clubs[c.clubId];
     const t = talk(pid);
-    const fee = t.agreed;
-    const err = signingBlocker(p);
+    const fee = t.agreed || 0;
+    const q = t.swap ? S.players[t.swap] : null;
+    const err = signingBlocker(p, q) || (q ? swapBlocker(q, p) : null);
     if (err) return toast(err, 'bad');
-    if (!fee && p.clubId !== 'FA') return toast('Agree a fee first.', 'bad');
+    if (!fee && !q && p.clubId !== 'FA') return toast('Agree a fee first.', 'bad');
     if (me.budget < fee) return toast('Not enough transfer budget.', 'bad');
     const terms = t.w?.agreed;
     if (!terms) return toast('Agree personal terms (wage and contract length) first.', 'bad');
     const wage = terms.wage;
-    if (wageBill() + wage > c.wageBudget) return toast(`${money(wage)}/wk doesn't fit your wage budget. Sell players to free up wages.`, 'bad');
+    if (wageBill() - (q ? q.wage || 0 : 0) + wage > c.wageBudget) return toast(`${money(wage)}/wk doesn't fit your wage budget. Sell players to free up wages.`, 'bad');
     const from = S.clubs[p.clubId];
     const fromName = from ? from.name : 'Free agency';
     me.budget -= fee;
     if (from && from.id !== 'FA') from.budget += fee;
+    if (q) {
+      // The swapped player goes the other way on a new deal with his new club.
+      movePlayer(q, from.id);
+      q.wage = wageFor(q); q.contract = c.season + randInt(2, 4);
+      c.offers = c.offers.filter((o) => o.pid !== q.id);
+      c.transfers.unshift({ season: c.season, date: curDate(), pid: q.id, name: q.name, dir: 'out', club: `${from.name} (swap)`, fee: 0 });
+    }
     movePlayer(p, c.clubId);
+    if (q) cleanLineup();
     p.wage = wage; p.contract = c.season + terms.years; p.inj = 0; p.sus = 0;
     delete c.talks[pid];
     c.transfers.unshift({ season: c.season, date: curDate(), pid, name: p.name, dir: 'in', club: fromName, fee });
-    news(`✍️ Signed ${p.name} (${p.pos}, ${p.ovr}) from ${fromName} for ${money(fee)} on ${money(wage)} a week until ${contractLabel(p)}.`, 'good');
+    news(`✍️ Signed ${p.name} (${p.pos}, ${p.ovr}) from ${fromName}${q ? ` in a swap for ${q.name}${fee ? ` plus ${money(fee)}` : ''}` : ` for ${money(fee)}`} on ${money(wage)} a week until ${contractLabel(p)}.`, 'good');
     save();
     toast(`${p.name} has joined ${me.name}!`, 'good');
     return true;
@@ -4331,7 +4370,9 @@
     const blocker = signingBlocker(p);
     const room = c.wageBudget - wageBill();
     const fa = p.clubId === 'FA';
-    const agreed = t.agreed > 0 || (fa && ui.neg.status === 'accepted');
+    const agreed = t.agreed > 0 || !!t.swap || (fa && ui.neg.status === 'accepted');
+    const swapQ = t.swap ? S.players[t.swap] : null;
+    const swapOpts = fa ? [] : S.clubs[c.clubId].pids.map((id) => S.players[id]).filter((q) => !q.loan).sort((a, b) => playerValue(b) - playerValue(a));
     const guess = fa ? val : niceRound(val * (0.9 + hash01(p.id + c.season) * 0.2));
     const defOffer = ((ui.neg.last || (fa ? val : niceRound(playerValue(p)))) / 1e6).toFixed(1);
     openModal(`
@@ -4353,12 +4394,13 @@
         ${ui.neg.msg ? `<div class="notice ${ui.neg.status === 'accepted' ? 'good' : ui.neg.status === 'counter' ? 'info' : ''}">${esc(ui.neg.msg)}</div>` : ''}
         ${!blocker && !agreed && !t.blocked ? `
           <div class="row gap wrap mt">
-            <label class="inline">Your offer (€ millions) <input class="input sm" id="neg-offer" type="number" min="0" step="0.5" value="${defOffer}"></label>
+            <label class="inline">${fa ? 'Your offer' : 'Cash'} (€ millions) <input class="input sm" id="neg-offer" type="number" min="0" step="0.5" value="${ui.neg.swap && ui.neg.last === 0 ? 0 : defOffer}"></label>
+            ${fa ? '' : `<label class="inline">🔁 Swap in <select class="input sm" id="neg-swap"><option value="">No player (cash only)</option>${swapOpts.map((q) => `<option value="${q.id}" ${ui.neg.swap === q.id ? 'selected' : ''}>${esc(q.name)} · ${q.pos} ${q.ovr} · ${money(playerValue(q))}</option>`).join('')}</select></label>`}
             <button class="btn primary" data-act="neg-bid" data-id="${pid}">Submit offer</button>
-            ${t.counter ? `<button class="btn" data-act="neg-counter" data-id="${pid}">Accept ${money(t.counter)}</button>` : ''}
+            ${t.counter || (t.counterSwap && t.counter === 0) ? `<button class="btn" data-act="neg-counter" data-id="${pid}">Accept ${t.counterSwap ? `swap for ${esc(S.players[t.counterSwap]?.name || '')}${t.counter ? ` + ${money(t.counter)}` : ''}` : money(t.counter)}</button>` : ''}
           </div>
-          <p class="muted small">Clubs accept offers at or above their valuation and counter offers that are close. Bids far below it end talks. You get 3 bids per player per window.</p>` : ''}
-        ${!blocker && agreed ? termsHtml(p, t, 'sign', `Fee agreed: ${fa ? `signing fee ${money(val)}` : money(t.agreed)}. Now agree personal terms.`, 'neg') : ''}
+          <p class="muted small">Clubs accept offers at or above their valuation and counter offers that are close. Bids far below it end talks. You get 3 bids per player per window.${fa ? '' : ' <strong>Swap deals:</strong> offer one of your players (plus cash if needed). The club values him by his price, age and whether he is good enough for their team, and he must be willing to join them.'}</p>` : ''}
+        ${!blocker && agreed ? termsHtml(p, t, 'sign', `${swapQ ? `Swap agreed: ${swapQ.name} (${swapQ.pos}, ${swapQ.ovr})${t.agreed ? ` + ${money(t.agreed)}` : ''} goes to ${clubName(p.clubId)}` : `Fee agreed: ${fa ? `signing fee ${money(val)}` : money(t.agreed)}`}. Now agree personal terms.`, 'neg') : ''}
       </div>`);
   }
 
@@ -4982,13 +5024,14 @@
     release: (id) => askConfirm(`Release ${S.players[id].name} for free?`, () => { sellPlayer(id, 'FA', 0); render(); }, 'Release'),
     buy: (id) => { ui.neg = null; negModal(id); },
     'neg-bid': (id) => {
-      const amount = Math.round((parseFloat($('#neg-offer').value) || 0) * 1e6);
-      if (amount <= 0) return toast('Enter an offer in € millions.', 'bad');
-      const r = submitBid(id, amount);
-      ui.neg = { pid: id, msg: r.msg, status: r.status, last: amount };
+      const amount = Math.max(0, Math.round((parseFloat($('#neg-offer').value) || 0) * 1e6));
+      const swap = $('#neg-swap')?.value || null;
+      if (amount <= 0 && !swap) return toast('Enter an offer in € millions, or pick a player to swap.', 'bad');
+      const r = submitBid(id, amount, swap);
+      ui.neg = { pid: id, msg: r.msg, status: r.status, last: amount, swap };
       negModal(id);
     },
-    'neg-counter': (id) => { const t = talk(id); if (t.counter > S.clubs[C().clubId].budget) return toast('Not enough transfer budget.', 'bad'); t.agreed = t.counter; ui.neg = { pid: id, msg: `Fee agreed: ${money(t.agreed)}. Now agree personal terms.`, status: 'accepted' }; negModal(id); },
+    'neg-counter': (id) => { const t = talk(id); if (t.counter > S.clubs[C().clubId].budget) return toast('Not enough transfer budget.', 'bad'); t.agreed = t.counter; t.swap = t.counterSwap || null; ui.neg = { pid: id, msg: t.swap ? 'Swap agreed. Now agree personal terms.' : `Fee agreed: ${money(t.agreed)}. Now agree personal terms.`, status: 'accepted' }; negModal(id); },
     'neg-sign': (id) => {
       const p = S.players[id];
       if (p.clubId === 'FA') talk(id).agreed = clubValuation(p, C().clubId);
@@ -5198,5 +5241,5 @@
   renderStart();
 
   // Exposed for debugging / tests.
-  window.SM = { serialize, get state() { return S; }, get world() { return W; }, simulateMatch, buildSide, playDay, advanceToUserMatch, nextUserMatch, simUntilDay, startCareer, startNextSeason, importRecords, rowsToRecords, playerValue, leagueTable, phaseTable, submitBid, interest, clubValuation, windowInfo, matchLineup, go, render };
+  window.SM = { serialize, get state() { return S; }, get world() { return W; }, simulateMatch, buildSide, playDay, advanceToUserMatch, nextUserMatch, simUntilDay, startCareer, startNextSeason, importRecords, rowsToRecords, playerValue, leagueTable, phaseTable, submitBid, swapValue, completeSigning, talk, interest, clubValuation, windowInfo, matchLineup, go, render };
 })();
