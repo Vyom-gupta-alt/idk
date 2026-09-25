@@ -31,6 +31,9 @@ On the Match tab, **🎮 Play Match (3D)** puts you on the pitch in a real-time 
 - Throw-ins, corners, goal kicks, half-time, a radar minimap, and penalties for level knockout ties.
 - Match length is 3, 5, 8 or 12 real minutes. You can end a match early and keep the current score.
 
+## Substitutions while simulating
+When you simulate a match as a manager, a **🔁 Substitution** button sits under the live commentary. It pauses the match so you can pick who comes off and who comes on (up to 5). The sub takes the same position, and the rest of the match is re-simulated from that minute. Everything that already happened stays the same. Once you make a change, the assistant stops making automatic subs for your side. Your bench always keeps room for your two best under-21 prospects, and the minutes they get count towards their appearances and development. With commentary set to Instant, the match is simulated in one go without a chance to sub.
+
 ## Wage budget reviews
 At the end of every season the board reviews your wage budget, and the result shows in the season summary:
 - Qualifying for Europe: +15% (Champions League), +8% (Europa League) or +5% (Conference League).

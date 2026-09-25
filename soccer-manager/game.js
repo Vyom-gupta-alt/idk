@@ -507,8 +507,15 @@
     const slots = FORMATIONS[formation];
     const xi = [];
     ids.forEach((id, i) => { if (id) xi.push({ pid: id, slot: slots[i][0], si: i, role: roleFor(S.players[id], slots[i][0], roles[i]) }); });
-    const bench = (club.nation ? club.squad || [] : club.pids).filter((id) => !ids.includes(id) && (club.nation ? S.players[id]?.inj <= 0 : available(S.players[id])))
-      .sort((a, b) => (S.players[b].ovr + (b === favor ? 20 : 0)) - (S.players[a].ovr + (a === favor ? 20 : 0))).slice(0, 9);
+    const benchAll = (club.nation ? club.squad || [] : club.pids).filter((id) => !ids.includes(id) && (club.nation ? S.players[id]?.inj <= 0 : available(S.players[id])))
+      .sort((a, b) => (S.players[b].ovr + (b === favor ? 20 : 0)) - (S.players[a].ovr + (a === favor ? 20 : 0)));
+    let bench = benchAll.slice(0, 9);
+    // Your bench keeps room for your best young prospects, so you can give them minutes.
+    if (userSide && !favor) {
+      const kids = benchAll.filter((id) => S.players[id].age <= 21 && !bench.slice(0, 7).includes(id)).sort((a, b) => S.players[b].pot - S.players[a].pot).slice(0, 2);
+      bench = bench.slice(0, 9 - kids.length).filter((id) => !kids.includes(id)).concat(kids);
+      bench = bench.concat(benchAll.filter((id) => !bench.includes(id))).slice(0, 9);
+    }
     return { clubId, name: club.name, short: club.short, formation, mentality, style, xi, bench };
   }
 
@@ -742,6 +749,22 @@
     }
 
     const agg = opts.agg || [0, 0];
+    // Substitutions the user makes while watching (live management), applied at the start of a given minute tick.
+    const manual = opts.subs || [];
+    const manualFrom = manual.length ? Math.min(...manual.map((x) => x.tick)) : Infinity;
+    function manualSub(sb) {
+      const side = sides[sb.side];
+      if ((side.subs || 0) >= 5 || !side.bench.includes(sb.on)) return;
+      const x = side.xi.find((y) => y.pid === sb.off);
+      if (!x) return;
+      side.subs = (side.subs || 0) + 1;
+      side.bench = side.bench.filter((id) => id !== sb.on);
+      x.pid = sb.on;
+      x.role = roleFor(S.players[sb.on], x.slot, x.role);
+      addPM(sb.on, sb.side, x.slot, parseInt(lbl, 10) || 1);
+      say('sub', sb.side, `🔁 ${side.name}: ${nm(sb.on)} comes on for ${nm(sb.off)}.`, { pid: sb.on, off: sb.off, manual: 1 });
+      recalc();
+    }
     const tot = (i) => score[i] + agg[i];
     // Tactical substitutions: the weakest (or most tired) player makes way for a fresher one.
     function tacticalSub(t, m) {
@@ -775,7 +798,9 @@
     function minute(m) {
       tickEv = 0;
       let attacked = false;
-      if (m === 60 || m === 70 || m === 80) for (const t of [0, 1]) if (rand() < 0.75) tacticalSub(t, m);
+      for (const sb of manual) if (sb.tick === ticks) manualSub(sb);
+      // Once you start making changes yourself, the assistant stops making substitutions for your side.
+      if (m === 60 || m === 70 || m === 80) for (const t of [0, 1]) if (rand() < 0.75 && !(t === opts.manualSide && ticks >= manualFrom)) tacticalSub(t, m);
       const c0 = Math.pow(Math.max(1, str[0].control), 3), c1 = Math.pow(Math.max(1, str[1].control), 3);
       let pH = c0 / (c0 + c1) + str[0].possBias - str[1].possBias;
       if (m >= 65) { if (tot(0) < tot(1)) pH += 0.07; else if (tot(0) > tot(1)) pH -= 0.07; }
@@ -1363,6 +1388,7 @@
 
   /* --- Playable 3D match: the result you play replaces the simulated one --- */
   let forced3d = null;
+  let forcedSim = null; // live-managed simulation of the user's match, applied when the day is played
   function applyPlayed(r, f, opts) {
     r.score = f.score.slice();
     r.goals = f.goals.map((g) => ({ lbl: String(g.min), side: g.side, pid: g.pid, apid: g.apid, pen: false, og: g.og, d3: true, dist: g.dist || 0, kind: g.kind || '' }));
@@ -1565,7 +1591,7 @@
       const m1 = l1 && l1.matches[mi];
       if (m1 && m1.played) opts.agg = [m1.ag, m1.hg];
     }
-    const r = simulateMatch(H, A, isUser && withText, opts);
+    const r = isUser && forcedSim ? forcedSim : simulateMatch(H, A, isUser && withText, opts);
     if (isUser && forced3d) applyPlayed(r, forced3d, opts);
     m.played = true; m.hg = r.score[0]; m.ag = r.score[1];
     if (r.et) m.et = 1;
@@ -3469,7 +3495,7 @@
     $('#modal .modal-box').classList.toggle('wide', !!wide);
     $('#modal').hidden = false;
   }
-  function closeModal() { $('#modal').hidden = true; $('#modal-body').innerHTML = ''; ui.neg = null; }
+  function closeModal() { $('#modal').hidden = true; $('#modal-body').innerHTML = ''; ui.neg = null; if (ui.playback && ui.playback.paused) resumePlayback(); }
 
   const ovrClass = (o) => (o >= 85 ? 'o-elite' : o >= 80 ? 'o-gold' : o >= 75 ? 'o-silver' : o >= 68 ? 'o-bronze' : 'o-low');
   const ovrBadge = (o) => `<span class="ovr ${ovrClass(o)}">${o}</span>`;
@@ -3659,7 +3685,7 @@
       default: return isPlayerMode() ? viewHomePlayer() : viewHome();
     }
   }
-  function go(v) { view = v; if (v !== 'match') ui.playback = null; render(); window.scrollTo(0, 0); }
+  function go(v) { if (ui.playback && ui.playback.live && !ui.playback.final) { clearTimers(); finalizeLive(); } view = v; if (v !== 'match') ui.playback = null; render(); window.scrollTo(0, 0); }
 
   function compStatus(comp, id) {
     if (comp.type === 'league') {
@@ -3880,11 +3906,43 @@
       </section>`;
   }
 
+  // Live match: the user's match is simulated with a fixed seed, so substitutions made while watching
+  // re-run it identically up to that minute and differently afterwards. The result is applied at full-time.
+  function liveRun(L) {
+    const saved = rng; rng = mulberry32(L.seed);
+    try { L.r = simulateMatch(deepClone(L.H0), deepClone(L.A0), true, { ...L.opts, subs: L.subs, manualSide: L.us }); } finally { rng = saved; }
+    const m = L.nm.m;
+    return { compId: L.nm.comp.id, ri: L.nm.ri, mi: L.nm.mi, date: L.nm.date, h: m.h, a: m.a, score: L.r.score, text: L.r.text, tl: L.r.tl, st: L.r.st,
+      goals: L.r.goals.map((g) => [g.lbl, g.side, g.pid, g.apid, g.pen ? 1 : 0]), lineups: L.lineups, forms: L.forms, live: true };
+  }
+  function finalizeLive() {
+    const pb = ui.playback;
+    if (!pb || !pb.live || pb.final) return;
+    pb.final = true;
+    forcedSim = pb.live.r;
+    let res;
+    try { res = playDay(true); } finally { forcedSim = null; }
+    save();
+    if (res) pb.res = res;
+  }
   function doSimulate() {
     const key = ui.previewKey;
     const nm = advanceToUserMatch();
     if (!nm) { save(); return render(); }
     if (nm.key !== key) { save(); toast('A new draw was made. You have a new next fixture.', 'info'); return render(); }
+    if (!isPlayerMode() && C().speed !== 'instant') {
+      const c = C(), uid = c.clubId, m = nm.m, rd = nm.rd;
+      const H = buildSide(m.h, m.h === uid), A = buildSide(m.a, m.a === uid);
+      const opts = { neutral: !!rd.final, ko: !!(rd.single || rd.leg === 2 || rd.final), final: !!rd.final, favor: null };
+      if (rd.leg === 2) { const l1 = nm.comp.rounds.find((r) => r.stage === rd.stage && r.leg === 1)?.matches[nm.mi]; if (l1 && l1.played) opts.agg = [l1.ag, l1.hg]; }
+      const L = { nm, H0: deepClone(H), A0: deepClone(A), opts, seed: randInt(1, 2e9), subs: [], us: m.h === uid ? 0 : 1,
+        lineups: [H.xi.map((x) => [x.pid, x.slot, x.si]), A.xi.map((x) => [x.pid, x.slot, x.si])], forms: [H.formation, A.formation] };
+      save();
+      ui.playback = { res: liveRun(L), live: L, shown: 0, tick: 0, lbl: '0', done: false };
+      render();
+      stepPlayback();
+      return;
+    }
     const res = playDay(true);
     save();
     if (!res) return render();
@@ -4041,12 +4099,50 @@
     clearTimers();
     const pb = ui.playback;
     if (!pb) return;
+    pb.paused = false;
+    finalizeLive();
     const events = pb.res.text || [];
     while (pb.shown < events.length) { if (ui.viz) ui.viz.applyEvent(events[pb.shown]); pb.shown++; }
     pb.tick = (pb.res.tl || []).length;
     pb.done = true;
     if (ui.viz) ui.viz.finish();
     updatePlayback();
+  }
+  // Who is on the pitch and on the bench for your side right now (from the events shown so far).
+  function liveSquad() {
+    const pb = ui.playback, L = pb.live, us = L.us;
+    const on = L.lineups[us].map((x) => x[0]);
+    let used = 0;
+    for (const e of (pb.res.text || []).slice(0, pb.shown)) {
+      if (e.side !== us) continue;
+      if ((e.type === 'sub' || e.type === 'injury') && e.off && e.pid && !e.gone) { const i = on.indexOf(e.off); if (i >= 0) on[i] = e.pid; used++; }
+      else if ((e.type === 'red' || e.gone) && e.pid) { const i = on.indexOf(e.pid); if (i >= 0) on.splice(i, 1); }
+    }
+    const side = us ? L.A0 : L.H0;
+    const bench = side.bench.filter((id) => !on.includes(id) && !(pb.res.text || []).slice(0, pb.shown).some((e) => e.pid === id));
+    const slotOf = Object.fromEntries(L.lineups[us].map((x) => [x[0], x[1]]));
+    for (const e of (pb.res.text || []).slice(0, pb.shown)) if (e.side === us && e.off && e.pid) slotOf[e.pid] = slotOf[e.off];
+    return { on, bench, used, slotOf };
+  }
+  function liveSubModal() {
+    const pb = ui.playback;
+    if (!pb || !pb.live || pb.done) return;
+    clearTimers(); pb.paused = true;
+    const { on, bench, used, slotOf } = liveSquad();
+    if (used >= 5) { pb.paused = false; stepPlayback(); return toast('You have used all 5 substitutions.', 'bad'); }
+    if (!bench.length) { pb.paused = false; stepPlayback(); return toast('Nobody left on the bench.', 'bad'); }
+    const row = (id, extra) => { const p = S.players[id]; return `<option value="${id}">${esc(p.name)} · ${p.pos} ${p.ovr}${extra || ''}</option>`; };
+    openModal(`<h2>🔁 Substitution · ${esc(pb.lbl)}'</h2>
+      <p class="muted small">${5 - used} of 5 substitutions left. The sub comes on in the same position. Young players who come on gain experience and develop.</p>
+      <div class="row gap wrap"><label class="inline">Off <select class="input" id="ls-off">${on.slice().sort((a, b) => (slotOf[a] === 'GK') - (slotOf[b] === 'GK')).map((id) => row(id, ` · playing ${slotOf[id] || ''}`)).join('')}</select></label>
+      <label class="inline">On <select class="input" id="ls-on">${bench.slice().sort((a, b) => (S.players[b].age <= 21) - (S.players[a].age <= 21) || S.players[b].ovr - S.players[a].ovr).map((id) => { const p = S.players[id]; return row(id, p.age <= 21 ? ` · age ${p.age}, POT ${p.pot}` : ''); }).join('')}</select></label></div>
+      <div class="row gap mt"><button class="btn primary" data-act="live-sub-do">Make substitution</button><button class="btn ghost" data-act="live-sub-cancel">Cancel</button></div>`);
+  }
+  function resumePlayback() {
+    const pb = ui.playback;
+    if (!pb || !pb.paused || pb.done) return;
+    pb.paused = false;
+    stepPlayback();
   }
   function mountPlayback() {
     const canvas = $('#pb-canvas');
@@ -4122,7 +4218,7 @@
         ${r.tl ? `<div class="viz-wrap"><canvas id="pb-canvas" aria-label="Live 2D view of the match"></canvas>
           <div class="viz-legend"><span><i class="lg-h"></i>${esc(H.short || H.name)}</span><span><i class="lg-a"></i>${esc(A.short || A.name)}</span><span class="muted">Yellow/pink dots are the goalkeepers.${c.pid ? ' The ringed dot is you.' : ''}</span></div></div>` : ''}
         <div class="progress"><i id="pb-prog"></i></div>
-        <div class="row gap center" id="pb-controls"><select class="input sm" id="sel-speed2" data-change="speed">${[['slow', 'Slow'], ['normal', 'Normal'], ['fast', 'Fast'], ['instant', 'Instant']].map(([k, l]) => `<option value="${k}" ${c.speed === k ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn sm" data-act="skip-playback">Skip to full-time ⏭</button></div>
+        <div class="row gap center" id="pb-controls">${ui.playback.live && !isPlayerMode() ? '<button class="btn sm primary" data-act="live-sub">🔁 Substitution</button>' : ''}<select class="input sm" id="sel-speed2" data-change="speed">${[['slow', 'Slow'], ['normal', 'Normal'], ['fast', 'Fast'], ['instant', 'Instant']].map(([k, l]) => `<option value="${k}" ${c.speed === k ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn sm" data-act="skip-playback">Skip to full-time ⏭</button></div>
         <ul class="feed" id="pb-feed"></ul>
         <div id="pb-after"></div>
       </section>`;
@@ -5114,6 +5210,16 @@
     'gala-watch': (y) => playGala(+y),
     'replay-celebrations': () => { const c = C(); c.celebrate = (c.lastCelebrate || []).slice(); playCelebrations(); },
     'skip-playback': () => finishPlayback(),
+    'live-sub': () => liveSubModal(),
+    'live-sub-cancel': () => closeModal(),
+    'live-sub-do': () => {
+      const pb = ui.playback; if (!pb || !pb.live) return;
+      const off = $('#ls-off').value, on = $('#ls-on').value;
+      pb.live.subs.push({ tick: pb.tick, side: pb.live.us, off, on });
+      pb.res = liveRun(pb.live);
+      closeModal();
+      toast(`🔁 ${S.players[on].name} comes on for ${S.players[off].name}.`, 'good');
+    },
     'end-playback': () => { clearTimers(); ui.playback = null; go('home'); },
     'end-playback-next': () => { clearTimers(); ui.playback = null; go('match'); },
     'next-season': () => { const c = C(); c.celebrate = []; c.lastCelebrate = []; startNextSeason(); ui.fixDay = null; go('home'); },
@@ -5361,5 +5467,5 @@
   renderStart();
 
   // Exposed for debugging / tests.
-  window.SM = { serialize, get state() { return S; }, get world() { return W; }, simulateMatch, buildSide, playDay, advanceToUserMatch, nextUserMatch, simUntilDay, startCareer, startNextSeason, importRecords, rowsToRecords, playerValue, leagueTable, phaseTable, submitBid, swapValue, payReleaseClause, triggerClauseOnYou, wageTalk, creditSale, completeSigning, talk, interest, clubValuation, windowInfo, matchLineup, go, render };
+  window.SM = { _pb: () => ui.playback, serialize, get state() { return S; }, get world() { return W; }, simulateMatch, buildSide, playDay, advanceToUserMatch, nextUserMatch, simUntilDay, startCareer, startNextSeason, importRecords, rowsToRecords, playerValue, leagueTable, phaseTable, submitBid, swapValue, payReleaseClause, triggerClauseOnYou, wageTalk, creditSale, completeSigning, talk, interest, clubValuation, windowInfo, matchLineup, go, render };
 })();
