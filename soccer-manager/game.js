@@ -1818,6 +1818,7 @@
     }
     c.nextQual = qualify(orders, cupWinners);
     s.nextEuro = EURO_ORDER.find((k) => c.nextQual[k].includes(uid)) || null;
+    s.wageBoost = wageReview(s, table);
     // Individual awards for your player (player career).
     if (c.mode === 'player') {
       if (s.topScorer?.pid === c.pid) s.trophies.push(`${S.leagues[c.leagueId].name} Golden Boot`);
@@ -1833,6 +1834,24 @@
     news(`Season ${seasonLabel(c.season)} complete: you finished ${ordinal(s.pos)}${s.trophies.length ? ` and won ${s.trophies.join(', ')}` : ''}.`, s.trophies.length ? 'good' : 'info');
   }
 
+  // The board reviews the wage budget: success (Europe, trophies, promotion, beating expectations) raises it; relegation cuts it.
+  function wageReview(s, table) {
+    const c = C(), uid = c.clubId, reasons = [];
+    const add = (pct, why) => reasons.push({ pct, why });
+    if (s.nextEuro === 'UCL') add(15, 'Champions League qualification');
+    else if (s.nextEuro === 'UEL') add(8, 'Europa League qualification');
+    else if (s.nextEuro === 'UECL') add(5, 'Conference League qualification');
+    if (s.promoted) add(20, `promotion to the ${s.promoted}`);
+    if (s.relegated) add(-15, 'relegation');
+    for (const t of s.trophies) add(t === S.leagues[c.leagueId].name ? 10 : EURO_ORDER.some((k) => EURO[k].name === t) ? (t === EURO.UCL.name ? 12 : 6) : 5, `winning the ${t}`);
+    // Beating (or falling short of) expectations: league position against squad strength.
+    const expected = table.map((r) => r.id).sort((a, b) => clubRating(b) - clubRating(a)).indexOf(uid) + 1;
+    const diff = expected - s.pos;
+    if (diff >= 4) add(6, `finishing ${ordinal(s.pos)} when tipped for ${ordinal(expected)}`);
+    else if (diff <= -5 && !s.relegated) add(-5, `finishing ${ordinal(s.pos)} when expected to finish ${ordinal(expected)}`);
+    const pct = clamp(reasons.reduce((a, r) => a + r.pct, 0), -25, 50);
+    return { pct, reasons };
+  }
   // Ballon d'Or: form, goals, assists, ratings and trophies won this season (top-flight players).
   function ballonDor(s, minApps = 18) {
     const c = C();
@@ -2359,7 +2378,12 @@
     aiTransfers(45);
     for (const club of Object.values(S.clubs)) if (isClub(club) && (club.id !== c.clubId || isPlayerMode())) club.formation = club.pids.length ? pickFormation(club) : null;
     invalidate();
-    c.wageBudget = niceRound(Math.max(c.wageBudget || 0, wageBill() * 1.08) * 1.04);
+    const wb = c.summary?.wageBoost, oldWB = c.wageBudget || 0;
+    c.wageBudget = niceRound(Math.max(oldWB, wageBill() * 1.08) * 1.04);
+    if (wb && wb.pct) {
+      c.wageBudget = niceRound(Math.max(wageBill() * 1.02, c.wageBudget * (1 + wb.pct / 100)));
+      if (!isPlayerMode()) news(`${wb.pct > 0 ? '📈' : '📉'} The board ${wb.pct > 0 ? 'raises' : 'cuts'} your wage budget by ${Math.abs(wb.pct)}% for ${wb.reasons.map((r) => r.why).join(', ')}: now ${money(c.wageBudget)} a week.`, wb.pct > 0 ? 'good' : 'bad');
+    }
     c.talks = {};
     setupSeason(c.season + 1, c.nextQual || { UCL: [], UEL: [], UECL: [] });
     cleanLineup();
@@ -3746,6 +3770,7 @@
           <div class="big-stat"><span>Trophies</span><strong>${s.trophies.length ? esc(s.trophies.join(', ')) : 'None'}</strong></div>
           <div class="big-stat"><span>Season income</span><strong class="money">${money(s.income)}</strong></div>
           <div class="big-stat"><span>Next season</span><strong>${s.nextEuro ? esc(EURO[s.nextEuro].name) : 'No European football'}</strong></div>
+          ${!isPlayerMode() && s.wageBoost ? `<div class="big-stat"><span>Wage budget review</span><strong class="${s.wageBoost.pct > 0 ? 'money' : s.wageBoost.pct < 0 ? 'warn-t' : ''}">${s.wageBoost.pct > 0 ? '+' : ''}${s.wageBoost.pct}%</strong><small>${s.wageBoost.reasons.length ? s.wageBoost.reasons.map((r) => `${r.pct > 0 ? '+' : ''}${r.pct}% ${esc(r.why)}`).join(' · ') : 'No change beyond the usual inflation'}</small></div>` : ''}
         </div>
         ${s.promoted ? `<div class="notice good">🎉 Promoted to the ${esc(s.promoted)}!</div>` : ''}${s.relegated ? `<div class="notice">⬇️ Relegated to the ${esc(s.relegated)}.</div>` : ''}
         ${s.me ? `<h4>Your season</h4><div class="stats-row"><div class="big-stat"><span>Apps</span><strong>${s.me.apps}</strong></div><div class="big-stat"><span>Goals · Assists</span><strong>${s.me.g} · ${s.me.a}</strong></div><div class="big-stat"><span>Avg rating</span><strong>${s.me.avg}</strong></div><div class="big-stat"><span>OVR</span><strong>${s.me.ovr0} → ${s.me.ovr}</strong></div></div>` : ''}

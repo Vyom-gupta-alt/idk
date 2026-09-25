@@ -31,6 +31,16 @@ On the Match tab, **🎮 Play Match (3D)** puts you on the pitch in a real-time 
 - Throw-ins, corners, goal kicks, half-time, a radar minimap, and penalties for level knockout ties.
 - Match length is 3, 5, 8 or 12 real minutes. You can end a match early and keep the current score.
 
+## Wage budget reviews
+At the end of every season the board reviews your wage budget, and the result shows in the season summary:
+- Qualifying for Europe: +15% (Champions League), +8% (Europa League) or +5% (Conference League).
+- Promotion: +20%.
+- Trophies: +10% for the league, +12% for the Champions League, +6% for another European trophy and +5% for a domestic cup.
+- Finishing at least 4 places above where your squad was expected to finish: +6%.
+- Relegation: −15%. Finishing 5 or more places below expectations: −5%.
+
+The total is capped between −25% and +50%, and the new budget applies from the next season.
+
 ## Swap deals
 When you negotiate for a player, you can offer one of your own players as part of the deal, with or without cash. The selling club values him by his market price, his age and whether he is good enough for their team. The player you offer must be willing to join them. If the swap falls a little short, the club tells you how much cash to add. Swaps work even when your squad is full, because one player leaves as another arrives.
 
