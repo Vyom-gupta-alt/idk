@@ -29,3 +29,6 @@ python3 -m http.server 8000
 ```
 
 Then visit `http://localhost:8000`.
+
+## Also in this repo
+- [`soccer-manager/`](soccer-manager/): **Soccer Manager 26**, a text-based football manager sim with real European leagues, a transfer market, formations, live match commentary and FC 26-style ratings import. Open `soccer-manager/index.html`.
