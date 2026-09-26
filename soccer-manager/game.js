@@ -3273,6 +3273,110 @@
   }
   // "Name: reason" lines grouped by reason, so a repeated reason is shown once.
   const groupFails = (fails) => { const g = {}; for (const [n, r] of fails) (g[r] = g[r] || []).push(n); return Object.entries(g).map(([r, ns]) => `${esc(r)} (${esc(ns.join(', '))})`).join(' · '); };
+  /* --- Sell advisor: which players to sell to free up wages and/or money for a signing --- */
+  // Lower score = sell first. Weighs OVR, potential, game time and average rating against the rest of your squad.
+  function sellRanking(exclude = []) {
+    const c = C(), squad = S.clubs[c.clubId].pids.map((id) => S.players[id]).filter((p) => p && !p.loan);
+    const rng2 = (f) => { const v = squad.map(f); const lo = Math.min(...v), hi = Math.max(...v); return (p) => (hi > lo ? (f(p) - lo) / (hi - lo) : 0.5); };
+    const avgOf = (p) => (p.st.apps ? avgRating(p) : 6.4);
+    const nO = rng2((p) => p.ovr), nP = rng2((p) => p.pot), nA = rng2((p) => p.st.apps), nR = rng2(avgOf);
+    return squad.filter((p) => !exclude.includes(p.id)).map((p) => {
+      const parts = { ovr: nO(p), pot: nP(p), apps: nA(p), avg: nR(p) };
+      const score = 0.35 * parts.ovr + 0.25 * parts.pot + 0.2 * parts.apps + 0.2 * parts.avg;
+      const why = [];
+      if (parts.ovr < 0.34) why.push(`one of your lowest OVRs (${p.ovr})`);
+      if (parts.pot < 0.34) why.push(`limited potential (${p.pot})`);
+      if (parts.apps < 0.34) why.push(p.st.apps ? `little game time (${p.st.apps} apps)` : 'has not played yet');
+      if (p.st.apps && parts.avg < 0.34) why.push(`poor ratings (${avgRating(p).toFixed(2)} avg)`);
+      return { p, score, why };
+    }).sort((a, b) => a.score - b.score);
+  }
+  // Greedy plan: sell the lowest-ranked players until both needs are met (never below the squad minimum or your last keeper).
+  function planSales(wageNeed, feeNeed, exclude = []) {
+    const c = C(), club = S.clubs[c.clubId];
+    ui.advOffers = ui.advOffers || {};
+    let left = club.pids.length, gks = club.pids.filter((id) => S.players[id].pos === 'GK').length, wage = 0, fee = 0;
+    const picks = [];
+    for (const r of sellRanking(exclude)) {
+      if (wage >= wageNeed && fee >= feeNeed) break;
+      if (left <= MIN_SQUAD) break;
+      if (r.p.pos === 'GK' && gks <= 1) continue;
+      if (!(r.p.id in ui.advOffers)) ui.advOffers[r.p.id] = sellOffers(r.p)[0] || null;
+      const o = ui.advOffers[r.p.id];
+      picks.push({ ...r, offer: o });
+      wage += r.p.wage; fee += o ? o.amount : 0; left--;
+      if (r.p.pos === 'GK') gks--;
+    }
+    return { picks, wage, fee, ok: wage >= wageNeed && fee >= feeNeed };
+  }
+  function playerProfileHtml(p, extra) {
+    const club = S.clubs[p.clubId];
+    return `<div class="pmodal adv-profile">
+      <div class="pm-head"><div class="pm-ovr ${ovrClass(p.ovr)}">${p.ovr}<small>${p.pos}</small></div>
+        <div><h3>${esc(p.name)} ${natTag(p.nat)}</h3><div class="muted small">${club ? esc(club.name) : ''} · Age ${p.age} · ${posTags(p)} ${statusIcons(p)}</div></div>${extra || ''}</div>
+      <div class="stats-row">
+        <div class="big-stat"><span>Potential</span><strong>${potBadge(p)}</strong></div>
+        <div class="big-stat"><span>Apps · G · A</span><strong>${p.st.apps} · ${p.st.goals} · ${p.st.assists}</strong></div>
+        <div class="big-stat"><span>Avg rating</span><strong>${p.st.apps ? avgRating(p).toFixed(2) : '-'}</strong></div>
+        <div class="big-stat"><span>Form</span><strong>${formArrow(p.form)}</strong></div>
+        <div class="big-stat"><span>Value</span><strong class="money">${money(playerValue(p))}</strong></div>
+        <div class="big-stat"><span>Wage</span><strong class="money">${money(p.wage)}/wk</strong></div>
+        <div class="big-stat"><span>Contract</span><strong>${contractLabel(p)}</strong></div>
+        <div class="big-stat"><span>Release clause</span><strong class="money">${p.relc ? money(p.relc) : '—'}</strong></div>
+      </div>
+      <h4>Attributes</h4>${attrChips(p)}
+      <h4>PlayStyles</h4>${psChips(p)}
+      <h4>Career</h4>${careerTableHtml(p, true)}
+    </div>`;
+  }
+  // ctx: { wage, fee, target } (target = pid of the player you want to sign, optional)
+  function adviceModal(ctx) {
+    const c = C(), win = windowInfo();
+    ui.adv = ctx = ctx || ui.adv || { wage: 0, fee: 0, exclude: [] };
+    ctx.exclude = ctx.exclude || [];
+    ui.bulkOpen = true;
+    const tp = ctx.target && S.players[ctx.target];
+    const room = c.wageBudget - wageBill(), budget = S.clubs[c.clubId].budget;
+    const plan = ctx.wage || ctx.fee ? planSales(ctx.wage, ctx.fee, ctx.exclude) : null;
+    const form = `<div class="row gap wrap">
+      <label class="inline">Wages to free (€K/wk) <input class="input xs" id="adv-wage" type="number" min="0" step="1" value="${Math.round((ctx.wage || 0) / 1000)}"></label>
+      <label class="inline">Money to raise (€M) <input class="input xs" id="adv-fee" type="number" min="0" step="0.5" value="${+((ctx.fee || 0) / 1e6).toFixed(1)}"></label>
+      <button class="btn" data-act="adv-run">Suggest players</button></div>`;
+    let body = '';
+    if (plan) {
+      const n = plan.picks.length;
+      body = n ? `<div class="notice ${plan.ok ? 'good' : ''}">${plan.ok ? '✅' : '⚠️'} Sell <strong>${n} player${n > 1 ? 's' : ''}</strong>: that frees <strong class="money">${money(plan.wage)}</strong>/wk in wages${plan.fee ? ` and raises about <strong class="money">${money(plan.fee)}</strong> in fees` : ''}.${plan.ok ? '' : ` That is not quite enough: you would be down to ${MIN_SQUAD} players, or nobody else can go. Consider a cheaper deal.`} They were picked for having the lowest mix of OVR, potential, game time and average rating in your squad.</div>
+        ${plan.picks.map((x) => playerProfileHtml(x.p, `<div class="adv-side"><div class="small"><strong>Why:</strong> ${esc(x.why.join(', ') || 'lowest overall mix in your squad')}</div>
+          <div class="small">${x.offer ? `Best offer: ${crest(S.clubs[x.offer.clubId], 'sm')} <strong>${esc(clubName(x.offer.clubId))}</strong> <span class="money">${money(x.offer.amount)}</span>` : '<span class="warn-t">No club can afford him: he would be released for free</span>'}</div>
+          <button class="btn xs ghost" data-act="adv-keep" data-id="${x.p.id}">Keep him instead</button></div>`)).join('')}
+        <div class="row gap wrap mt"><button class="btn primary big" data-act="adv-sell" ${win.open ? '' : 'disabled'}>Sell these ${n} player${n > 1 ? 's' : ''}</button>${ctx.exclude.length ? `<button class="btn ghost" data-act="adv-reset">Reset kept players (${ctx.exclude.length})</button>` : ''}</div>`
+        : '<p class="muted">There is nobody left to sell without going under the squad minimum.</p>';
+    } else body = '<p class="muted">Enter how much you need to free up, or open this from a negotiation where the wage or fee does not fit.</p>';
+    openModal(`<h2>💡 Make room for a signing</h2>
+      ${tp ? `<p>To sign <strong>${esc(tp.name)}</strong> (${tp.pos}, ${tp.ovr}) from ${esc(clubName(tp.clubId))}, you are short of ${ctx.wage ? `<strong class="money">${money(ctx.wage)}</strong>/wk in wages` : ''}${ctx.wage && ctx.fee ? ' and ' : ''}${ctx.fee ? `<strong class="money">${money(ctx.fee)}</strong> in transfer budget` : ''}.</p>` : ''}
+      <p class="muted small">Wage room now: <span class="money">${money(room)}</span>/wk · Transfer budget: <span class="money">${money(budget)}</span>.${win.open ? '' : ` ${esc(win.label)}: sales have to wait until it opens.`}</p>
+      ${form}${body}`, true);
+  }
+  function adviceSell() {
+    const ctx = ui.adv, plan = planSales(ctx.wage, ctx.fee, ctx.exclude);
+    const c = C();
+    let n = 0, fee = 0; const fails = [];
+    for (const x of plan.picks) {
+      const o = x.offer, buyer = o && S.clubs[o.clubId];
+      const ok = o && buyer.budget >= o.amount && buyer.pids.length < MAX_SQUAD;
+      const r = sellPlayer(x.p.id, ok ? o.clubId : 'FA', ok ? o.amount : 0, true);
+      if (r === true) { n++; fee += ok ? o.amount : 0; } else fails.push([x.p.name, r]);
+    }
+    ui.advOffers = {};
+    save();
+    toast(`${n} player${n === 1 ? '' : 's'} sold${fee ? ` for ${money(fee)}` : ''}. Wage room now ${money(c.wageBudget - wageBill())}/wk.`, 'good');
+    if (fails.length) news(`Some sales did not go through: ${fails.map(([a, b]) => `${a} (${b})`).join(', ')}.`, 'bad');
+    ui.bulkOpen = false;
+    const target = ctx.target;
+    ui.adv = null;
+    if (target && S.players[target]) { render(); negModal(target); } else { closeModal(); render(); }
+  }
+
   function bulkSell(release) {
     const c = C();
     let n = 0, fee = 0;
@@ -3989,7 +4093,7 @@
    * Game shell
    * ------------------------------------------------------------------ */
   const TABS = [['home', 'Home'], ['match', 'Match'], ['squad', 'Squad & Tactics'], ['training', 'Training'], ['transfers', 'Transfers'], ['academy', 'Academy'], ['fixtures', 'Fixtures'], ['comps', 'Competitions'], ['intl', 'International'], ['awards', 'Awards'], ['stats', 'Stats'], ['data', 'Data']];
-  const TABS_PLAYER = [['home', 'Home'], ['match', 'Match'], ['career', 'My Career'], ['club', 'Club'], ['fixtures', 'Fixtures'], ['comps', 'Competitions'], ['intl', 'International'], ['awards', 'Awards'], ['stats', 'Stats'], ['data', 'Data']];
+  const TABS_PLAYER = [['home', 'Home'], ['match', 'Match'], ['career', 'My Career'], ['training', 'Training'], ['club', 'Club'], ['fixtures', 'Fixtures'], ['comps', 'Competitions'], ['intl', 'International'], ['awards', 'Awards'], ['stats', 'Stats'], ['data', 'Data']];
   function render() {
     if (!S || !S.career) return renderStart();
     if (view !== 'match' || !ui.playback) clearTimers();
@@ -4842,7 +4946,7 @@
     return `
       <section class="card">
         <div class="row between wrap gap">
-          <h3>Transfer market</h3>
+          <h3>Transfer market <button class="btn xs" data-act="adv-open" data-id="">💡 Sell players to free up wages</button></h3>
           <div class="budgets"><span><span class="muted">Budget</span> <strong class="money">${money(me.budget)}</strong></span><span><span class="muted">Wages</span> <strong class="money">${money(bill)}</strong><span class="muted"> / ${money(c.wageBudget)} a week</span></span><span class="muted small">Squad ${me.pids.length}/${MAX_SQUAD}</span></div>
         </div>
         <div class="notice ${win.open ? 'good' : ''}"><strong>${esc(win.label)}.</strong> ${win.open ? 'You can buy and sell players, and AI clubs are doing deals too.' : 'You can only sign free agents until the window opens. Use the Fixtures tab to move forward in time.'}</div>
@@ -4956,6 +5060,7 @@
           <tr><td>Wage room</td><td class="money ${room < wage ? 'warn-t' : ''}">${money(room)} / week</td></tr>
         </tbody></table>
         ${blocker ? `<div class="notice">${esc(blocker)}</div>` : ''}
+        ${(() => { const feeNow = t.agreed || (fa ? val : guess), wShort = it.lvl ? Math.max(0, wage - room) : 0, fShort = Math.max(0, feeNow - me.budget); return wShort || fShort ? `<div class="notice">Short of ${wShort ? `<strong>${money(wShort)}</strong>/wk in wages` : ''}${wShort && fShort ? ' and ' : ''}${fShort ? `<strong>${money(fShort)}</strong> for the fee` : ''}. <button class="btn xs primary" data-act="adv-open" data-id="${pid}|${wShort}|${fShort}">💡 Suggest players to sell</button></div>` : ''; })()}
         ${ui.neg.msg ? `<div class="notice ${ui.neg.status === 'accepted' ? 'good' : ui.neg.status === 'counter' ? 'info' : ''}">${esc(ui.neg.msg)}</div>` : ''}
         ${!blocker && !agreed && !t.blocked ? `
           <div class="row gap wrap mt">
@@ -5260,7 +5365,27 @@
     }
     return { n, skip };
   }
+  function viewTrainingPlayer() {
+    const c = C(), p = me();
+    const prof = APROF[PROF_OF[p.pos]];
+    return `<div class="grid g2">
+      <section class="card span2">
+        <div class="row between wrap gap"><h3>🏋️ Your training</h3>
+          <label class="inline">Intensity <select class="input sm" id="train-int" data-change="train-int">${Object.entries(TRAIN_INT).map(([k, [l]]) => `<option value="${k}" ${(c.trainInt || 'normal') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
+        <p class="muted small">After every match your club plays, you train your focus. You improve fastest while you are young. Key attributes (★) for your position also raise your OVR, up to your potential. You can also learn a new position so you can play there without a penalty. Intense training is faster, but you can pick up injuries.</p>
+        <div class="pcard"><div class="pm-ovr big ${ovrClass(p.ovr)}">${p.ovr}<small>${p.pos}</small></div>
+          <div class="pcard-main"><h2>${esc(p.name)} ${delta(p)}</h2><div class="row gap wrap">${posTags(p)} ${mainPosButtons(p)}</div>
+            <div class="muted small">Potential ${potBadge(p)} · Age ${p.age}</div></div></div>
+        <h4>Attributes</h4>${attrChips(p)}
+        <div class="row gap wrap mt"><span class="muted small">Focus</span> ${trainControls(p)} <button class="btn sm" data-act="train-me-auto" title="Train your most useful key attribute">⚡ Pick the best for me</button></div>
+        <div class="mt">${trainProgress(p)}</div>
+      </section>
+      <section class="card"><h3>What each attribute does</h3><ul class="help">${attrKeys(p).map((k) => `<li><strong>${ATTR_NAME[k]}${prof[k][1] >= 0.25 ? ' ★' : ''}</strong>: ${attr(p, k)}${(p.tb && p.tb[k]) ? ` (+${p.tb[k]} trained, max +15)` : ''}${prof[k][1] >= 0.25 ? ' · raises your OVR' : ''}</li>`).join('')}</ul></section>
+      <section class="card"><h3>PlayStyles</h3>${psChips(p)}<p class="muted small">PlayStyles unlock as your attributes grow. They matter when you play matches in 3D.</p></section>
+    </div>`;
+  }
   function viewTraining() {
+    if (isPlayerMode()) return viewTrainingPlayer();
     const c = C(), club = S.clubs[c.clubId];
     const players = club.pids.map((id) => S.players[id]).sort((a, b) => POS_ORDER[a.pos] - POS_ORDER[b.pos] || b.ovr - a.ovr);
     const n = players.filter((p) => p.tf).length;
@@ -5623,10 +5748,16 @@
     assign: (id) => { if (ui.squadSel !== null) assignToSlot(ui.squadSel, id); },
     'auto-pick': () => { const c = C(); c.lineup = bestXI(S.clubs[c.clubId].pids, c.formation); cleanLineup(); ui.squadSel = null; save(); render(); toast('Best available XI selected. It stays until you change it.', 'good'); },
     'squad-sort': (id) => { ui.squadSort = id; render(); },
+    'adv-open': (id) => { const [pid, w, f] = (id || '').split('|'); ui.advOffers = {}; adviceModal({ target: pid || null, wage: +w || 0, fee: +f || 0, exclude: [] }); },
+    'adv-run': () => { const a = ui.adv || {}; a.wage = Math.round((parseFloat($('#adv-wage').value) || 0) * 1000); a.fee = Math.round((parseFloat($('#adv-fee').value) || 0) * 1e6); adviceModal(a); },
+    'adv-keep': (id) => { ui.adv.exclude.push(id); adviceModal(); },
+    'adv-reset': () => { ui.adv.exclude = []; adviceModal(); },
+    'adv-sell': () => { const n = planSales(ui.adv.wage, ui.adv.fee, ui.adv.exclude).picks.length; askConfirm(`Sell ${n} player${n > 1 ? 's' : ''} now?`, () => adviceSell(), 'Sell them'); },
     'train-sel': (id) => { const s2 = ui.trainSel || []; ui.trainSel = s2.includes(id) ? s2.filter((x) => x !== id) : s2.concat(id); render(); },
     'train-sel-all': () => { const all = S.clubs[C().clubId].pids; ui.trainSel = (ui.trainSel || []).length === all.length ? [] : all.slice(); render(); },
     'train-sel-u21': () => { ui.trainSel = S.clubs[C().clubId].pids.filter((id) => S.players[id].age <= 21); render(); },
     'train-sel-clear': () => { ui.trainSel = []; render(); },
+    'train-me-auto': () => { const r = bulkTrain([C().pid], 'AUTO'); save(); render(); toast(r.n ? `You now train ${ATTR_NAME[me().tf]}.` : 'Every attribute is maxed out.', r.n ? 'good' : 'info'); },
     'train-auto-all': () => { const r = bulkTrain(S.clubs[C().clubId].pids, 'AUTO'); save(); render(); toast(`${r.n} players now train their best key attribute.`, 'good'); },
     'train-rest-all': () => askConfirm('Clear the training focus of every player (including anyone learning a position)?', () => { bulkTrain(S.clubs[C().clubId].pids, 'REST'); save(); render(); }, 'Rest everyone'),
     'train-bulk-apply': () => {
