@@ -84,7 +84,7 @@ When you negotiate for a player, you can offer one of your own players as part o
   - **Improve an attribute:** it grows after every match your club plays, fastest for young players (up to +15 from training). Key attributes also raise OVR, up to the player's potential. Trained shooting, physical (heading) and keeping directly help in matches.
   - **Learn a new position:** familiarity grows each session, and the out-of-position penalty shrinks as he learns. Similar positions (CB→CDM) are quicker than distant ones (CB→ST). Once learned, he plays there with no penalty, and you can make it his main position.
   - **Intensity:** light, normal or intense. Intense is faster but risks training injuries.
-- **Tactics:** 9 formations, 4 mentalities and 7 play styles: Balanced, Tiki-taka, Gegenpress, Counter-attack, Long ball, Wing play and Park the bus. Each changes possession, attacking rate, chance quality, crossing and cards in the match engine.
+- **Tactics:** 27 formations (grouped by back three, four or five, including 4-2-2-2, 4-3-2-1, 3-4-2-1, 5-2-3 and a false-9 4-3-3), 4 mentalities and 7 play styles: Balanced, Tiki-taka, Gegenpress, Counter-attack, Long ball, Wing play and Park the bus. Each changes possession, attacking rate, chance quality, crossing and cards in the match engine.
 - **Player roles** for every position, e.g. Holding midfielder, Deep-lying playmaker, Box-to-box, Mezzala, Inside forward, Cross specialist, Target man, Poacher, False 9 and Wing-back. Roles change who shoots, who creates, who heads crosses in, and how much each player adds to attack, midfield or defence. Goal commentary changes with the role too.
 - **Player type (player career):** choose how you play (for example a winger who cuts in, or a cross specialist), and change it later in My Career.
 - **Contracts & wage negotiation (both modes):** every player has a contract end date. Manager: agree the fee, then personal terms (wage and contract length) with counter-offers, and renew expiring contracts or the player leaves on a free. Player career: ask clubs for a higher wage (they have a hidden limit and may withdraw), and negotiate a new contract with your own club.
@@ -104,7 +104,7 @@ When you negotiate for a player, you can offer one of your own players as part o
 - **Contracts & retirement:** managers can terminate a player's contract (paying him off), resign and choose a job offer from another club, or retire. Players can terminate their contract and join a club as a free agent, or retire. Retiring ends the career with a summary of your stats, clubs, trophies and awards, plus a farewell ceremony.
 - **Compressed saves:** saves are gzip-compressed so large worlds fit in browser storage.
 - **FC 26 ratings import** (CSV/JSON): `Name`/`short_name`/`long_name`, `Club`/`club_name`, `Position`/`player_positions`, `OVR`/`overall`, `Age`, `League`.
-- **Match engine:** a minute-by-minute simulation with live text commentary, stats, player ratings, extra time and penalty shootouts. 9 formations and 4 mentalities.
+- **Match engine:** a minute-by-minute simulation with live text commentary, stats, player ratings, extra time and penalty shootouts. 27 formations and 4 mentalities.
 - Stats per competition, a trophy cabinet, season history and auto-save.
 
 ## Files

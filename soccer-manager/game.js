@@ -111,8 +111,32 @@
     '3-4-3': [['GK', 50, 91], ['CB', 25, 74], ['CB', 50, 77], ['CB', 75, 74], ['LM', 12, 46], ['CM', 38, 52], ['CM', 62, 52], ['RM', 88, 46], ['LW', 18, 21], ['ST', 50, 14], ['RW', 82, 21]],
     '5-3-2': [['GK', 50, 91], ['LWB', 9, 62], ['CB', 29, 74], ['CB', 50, 77], ['CB', 71, 74], ['RWB', 91, 62], ['CM', 27, 47], ['CM', 50, 51], ['CM', 73, 47], ['ST', 37, 16], ['ST', 63, 16]],
     '5-4-1': [['GK', 50, 91], ['LWB', 9, 62], ['CB', 29, 74], ['CB', 50, 77], ['CB', 71, 74], ['RWB', 91, 62], ['LM', 14, 40], ['CM', 38, 47], ['CM', 62, 47], ['RM', 86, 40], ['ST', 50, 14]],
+    '4-3-3 (Attack)': [['GK', 50, 91], ['LB', 13, 70], ['CB', 37, 75], ['CB', 63, 75], ['RB', 87, 70], ['CM', 30, 52], ['CAM', 50, 38], ['CM', 70, 52], ['LW', 16, 20], ['ST', 50, 13], ['RW', 84, 20]],
+    '4-3-3 (Defend)': [['GK', 50, 91], ['LB', 13, 70], ['CB', 37, 75], ['CB', 63, 75], ['RB', 87, 70], ['CDM', 36, 58], ['CM', 50, 47], ['CDM', 64, 58], ['LW', 16, 24], ['ST', 50, 15], ['RW', 84, 24]],
+    '4-3-3 (False 9)': [['GK', 50, 91], ['LB', 13, 70], ['CB', 37, 75], ['CB', 63, 75], ['RB', 87, 70], ['CM', 28, 52], ['CDM', 50, 58], ['CM', 72, 52], ['LW', 16, 20], ['CAM', 50, 27], ['RW', 84, 20]],
+    '4-4-2 (Holding)': [['GK', 50, 91], ['LB', 13, 70], ['CB', 37, 75], ['CB', 63, 75], ['RB', 87, 70], ['LM', 13, 44], ['CDM', 37, 55], ['CDM', 63, 55], ['RM', 87, 44], ['ST', 37, 16], ['ST', 63, 16]],
+    '4-4-1-1': [['GK', 50, 91], ['LB', 13, 70], ['CB', 37, 75], ['CB', 63, 75], ['RB', 87, 70], ['LM', 13, 46], ['CM', 37, 52], ['CM', 63, 52], ['RM', 87, 46], ['CAM', 50, 30], ['ST', 50, 13]],
+    '4-5-1': [['GK', 50, 91], ['LB', 13, 70], ['CB', 37, 75], ['CB', 63, 75], ['RB', 87, 70], ['LM', 12, 42], ['CM', 32, 50], ['CAM', 50, 38], ['CM', 68, 50], ['RM', 88, 42], ['ST', 50, 14]],
+    '4-2-2-2': [['GK', 50, 91], ['LB', 13, 70], ['CB', 37, 75], ['CB', 63, 75], ['RB', 87, 70], ['CDM', 37, 57], ['CDM', 63, 57], ['CAM', 25, 35], ['CAM', 75, 35], ['ST', 37, 15], ['ST', 63, 15]],
+    '4-3-1-2': [['GK', 50, 91], ['LB', 13, 70], ['CB', 37, 75], ['CB', 63, 75], ['RB', 87, 70], ['CM', 27, 51], ['CM', 50, 55], ['CM', 73, 51], ['CAM', 50, 35], ['ST', 37, 15], ['ST', 63, 15]],
+    '4-3-2-1': [['GK', 50, 91], ['LB', 13, 70], ['CB', 37, 75], ['CB', 63, 75], ['RB', 87, 70], ['CM', 27, 52], ['CDM', 50, 57], ['CM', 73, 52], ['CAM', 33, 32], ['CAM', 67, 32], ['ST', 50, 13]],
+    '4-1-3-2': [['GK', 50, 91], ['LB', 13, 70], ['CB', 37, 75], ['CB', 63, 75], ['RB', 87, 70], ['CDM', 50, 59], ['LM', 16, 42], ['CM', 50, 45], ['RM', 84, 42], ['ST', 37, 16], ['ST', 63, 16]],
+    '4-2-4': [['GK', 50, 91], ['LB', 13, 70], ['CB', 37, 75], ['CB', 63, 75], ['RB', 87, 70], ['CM', 37, 52], ['CM', 63, 52], ['LW', 14, 22], ['ST', 38, 15], ['ST', 62, 15], ['RW', 86, 22]],
+    '3-4-1-2': [['GK', 50, 91], ['CB', 25, 74], ['CB', 50, 77], ['CB', 75, 74], ['LM', 12, 47], ['CM', 38, 53], ['CM', 62, 53], ['RM', 88, 47], ['CAM', 50, 34], ['ST', 37, 15], ['ST', 63, 15]],
+    '3-4-2-1': [['GK', 50, 91], ['CB', 25, 74], ['CB', 50, 77], ['CB', 75, 74], ['LWB', 10, 48], ['CM', 38, 54], ['CM', 62, 54], ['RWB', 90, 48], ['CAM', 32, 31], ['CAM', 68, 31], ['ST', 50, 13]],
+    '3-1-4-2': [['GK', 50, 91], ['CB', 25, 74], ['CB', 50, 77], ['CB', 75, 74], ['CDM', 50, 60], ['LM', 12, 44], ['CM', 37, 48], ['CM', 63, 48], ['RM', 88, 44], ['ST', 37, 16], ['ST', 63, 16]],
+    '3-5-2 (Attack)': [['GK', 50, 91], ['CB', 25, 74], ['CB', 50, 77], ['CB', 75, 74], ['LWB', 10, 44], ['CM', 32, 52], ['CAM', 50, 38], ['CM', 68, 52], ['RWB', 90, 44], ['ST', 37, 15], ['ST', 63, 15]],
+    '5-2-1-2': [['GK', 50, 91], ['LWB', 9, 62], ['CB', 29, 74], ['CB', 50, 77], ['CB', 71, 74], ['RWB', 91, 62], ['CM', 35, 51], ['CM', 65, 51], ['CAM', 50, 36], ['ST', 37, 16], ['ST', 63, 16]],
+    '5-2-3': [['GK', 50, 91], ['LWB', 9, 62], ['CB', 29, 74], ['CB', 50, 77], ['CB', 71, 74], ['RWB', 91, 62], ['CM', 35, 51], ['CM', 65, 51], ['LW', 18, 24], ['ST', 50, 15], ['RW', 82, 24]],
+    '5-3-2 (Holding)': [['GK', 50, 91], ['LWB', 9, 62], ['CB', 29, 74], ['CB', 50, 77], ['CB', 71, 74], ['RWB', 91, 62], ['CM', 27, 48], ['CDM', 50, 57], ['CM', 73, 48], ['ST', 37, 16], ['ST', 63, 16]],
   };
   const FORMATION_NAMES = Object.keys(FORMATIONS);
+  // Dropdown options grouped by the number of defenders.
+  function formationOptions(cur) {
+    const groups = {};
+    for (const f of FORMATION_NAMES) (groups[f[0]] = groups[f[0]] || []).push(f);
+    return Object.keys(groups).sort((a, b) => b - a).map((d) => `<optgroup label="${d} at the back">${groups[d].sort().map((f) => `<option value="${f}" ${f === cur ? 'selected' : ''}>${f}</option>`).join('')}</optgroup>`).join('');
+  }
   const MENTALITY = {
     defensive: { label: 'Defensive', att: -2.5, def: 2.5, poss: -0.02 },
     balanced: { label: 'Balanced', att: 0, def: 0, poss: 0 },
@@ -4634,7 +4658,7 @@
       <div class="grid g-squad">
         <section class="card">
           <div class="row gap wrap">
-            <label class="inline">Formation <select class="input sm" id="sel-formation" data-change="formation">${FORMATION_NAMES.map((f) => `<option ${f === c.formation ? 'selected' : ''}>${f}</option>`).join('')}</select></label>
+            <label class="inline">Formation <select class="input sm" id="sel-formation" data-change="formation">${formationOptions(c.formation)}</select></label>
             <label class="inline">Mentality <select class="input sm" id="sel-mentality2" data-change="mentality">${Object.entries(MENTALITY).map(([k, m]) => `<option value="${k}" ${c.mentality === k ? 'selected' : ''}>${m.label}</option>`).join('')}</select></label>
             <label class="inline">Play style <select class="input sm" id="sel-style" data-change="style">${Object.entries(STYLES).map(([k, st]) => `<option value="${k}" ${(c.style || 'balanced') === k ? 'selected' : ''}>${st.label}</option>`).join('')}</select></label>
             <button class="btn sm" data-act="auto-pick">Auto-pick best XI</button>
