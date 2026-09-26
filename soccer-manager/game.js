@@ -5240,10 +5240,32 @@
   function rerenderTraining(p) {
     if ($('.pmodal')) playerModal(p.id); else render();
   }
+  // Bulk training: the most valuable key attribute for his position that still has room to improve.
+  const trainMaxed = (p, k) => ((p.tb && p.tb[k]) || 0) >= 15 || attr(p, k) >= 99;
+  function autoFocus(p) {
+    const prof = APROF[PROF_OF[p.pos]];
+    const keys = attrKeys(p).filter((k) => !trainMaxed(p, k));
+    return keys.sort((a, b) => prof[b][1] - prof[a][1] || attr(p, a) - attr(p, b))[0] || null;
+  }
+  // v: 'AUTO', 'REST' or an attribute key. Returns how many players were changed and who was skipped.
+  function bulkTrain(ids, v) {
+    let n = 0; const skip = [];
+    for (const id of ids) {
+      const p = S.players[id];
+      if (!p) continue;
+      const k = v === 'REST' ? null : v === 'AUTO' ? autoFocus(p) : v;
+      if (k && (!attrKeys(p).includes(k) || trainMaxed(p, k))) { skip.push(p.name); continue; }
+      if (p.tf !== k) { p.tf = k; p.tp = 0; p.tpos = null; }
+      n++;
+    }
+    return { n, skip };
+  }
   function viewTraining() {
     const c = C(), club = S.clubs[c.clubId];
     const players = club.pids.map((id) => S.players[id]).sort((a, b) => POS_ORDER[a.pos] - POS_ORDER[b.pos] || b.ovr - a.ovr);
     const n = players.filter((p) => p.tf).length;
+    const sel = (ui.trainSel = (ui.trainSel || []).filter((id) => club.pids.includes(id)));
+    const focusOpts = `<option value="AUTO">⚡ Best key attribute (automatic)</option><option value="REST">No focus (rest)</option><optgroup label="Outfield">${ATTRS.map((k) => `<option value="${k}">${ATTR_NAME[k]}</option>`).join('')}</optgroup><optgroup label="Goalkeepers">${GK_ATTRS.map((k) => `<option value="${k}">${ATTR_NAME[k]}</option>`).join('')}</optgroup>`;
     return `
       <section class="card">
         <div class="row between wrap gap">
@@ -5251,8 +5273,14 @@
           <label class="inline">Intensity <select class="input sm" id="train-int" data-change="train-int">${Object.entries(TRAIN_INT).map(([k, [l]]) => `<option value="${k}" ${(c.trainInt || 'normal') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         </div>
         <p class="muted small">Give each player a training focus. After every match your club plays, players with a focus train it: young players improve fastest. Improving a key attribute (★) for his position also raises his OVR, up to his potential. Trained shooting, heading (physical) and keeping directly help in matches. <strong>Learn a new position</strong> to play him there without the out-of-position penalty: he gets better there as he learns it, and similar positions take less time. Intense training is faster but players can get injured. ${n} of ${players.length} players have a focus.</p>
-        <div class="tbl-wrap"><table class="tbl train-tbl"><thead><tr><th>Pos</th><th class="left">Name</th><th>Age</th><th>OVR</th><th>POT</th><th class="left">Attributes</th><th class="left">Focus</th><th class="left">Progress</th></tr></thead><tbody>
-        ${players.map((p) => `<tr class="${!available(p) ? 'unavail' : ''}"><td class="nowrap">${posTags(p)}</td><td class="left">${playerLink(p)} ${statusIcons(p)}${p.alt && p.alt.length ? `<div>${mainPosButtons(p)}</div>` : ''}</td><td>${p.age}</td><td>${ovrBadge(p.ovr)}${delta(p)}</td><td>${potBadge(p)}</td>
+        <div class="bulk-bar row gap wrap">
+          <button class="btn sm primary" data-act="train-auto-all" title="Every player trains the most useful key attribute for his position">⚡ Auto-train whole squad</button>
+          <button class="btn sm ghost" data-act="train-rest-all">Rest everyone</button>
+          <button class="btn sm ghost" data-act="train-sel-u21">Select under-21s</button>
+          ${sel.length ? `<span class="row gap wrap"><strong>${sel.length} selected</strong><select class="input sm" id="bulk-tf">${focusOpts}</select><button class="btn sm primary" data-act="train-bulk-apply">Apply to selected</button><button class="btn sm ghost" data-act="train-sel-clear">Clear</button></span>` : '<span class="muted small">or tick players to give them all the same focus.</span>'}
+        </div>
+        <div class="tbl-wrap"><table class="tbl train-tbl squad-tbl"><thead><tr><th><input type="checkbox" data-act="train-sel-all" title="Select all" ${sel.length && sel.length === players.length ? 'checked' : ''}></th><th>Pos</th><th class="left">Name</th><th>Age</th><th>OVR</th><th>POT</th><th class="left">Attributes</th><th class="left">Focus</th><th class="left">Progress</th></tr></thead><tbody>
+        ${players.map((p) => `<tr class="${!available(p) ? 'unavail' : ''}"><td><input type="checkbox" data-act="train-sel" data-id="${p.id}" ${sel.includes(p.id) ? 'checked' : ''} aria-label="Select ${esc(p.name)}"></td><td class="nowrap">${posTags(p)}</td><td class="left">${playerLink(p)} ${statusIcons(p)}${p.alt && p.alt.length ? `<div>${mainPosButtons(p)}</div>` : ''}</td><td>${p.age}</td><td>${ovrBadge(p.ovr)}${delta(p)}</td><td>${potBadge(p)}</td>
           <td class="left">${attrChips(p)}</td><td class="left nowrap">${trainControls(p)}</td><td class="left train-prog">${trainProgress(p)}</td></tr>`).join('')}
         </tbody></table></div>
       </section>`;
@@ -5595,6 +5623,17 @@
     assign: (id) => { if (ui.squadSel !== null) assignToSlot(ui.squadSel, id); },
     'auto-pick': () => { const c = C(); c.lineup = bestXI(S.clubs[c.clubId].pids, c.formation); cleanLineup(); ui.squadSel = null; save(); render(); toast('Best available XI selected. It stays until you change it.', 'good'); },
     'squad-sort': (id) => { ui.squadSort = id; render(); },
+    'train-sel': (id) => { const s2 = ui.trainSel || []; ui.trainSel = s2.includes(id) ? s2.filter((x) => x !== id) : s2.concat(id); render(); },
+    'train-sel-all': () => { const all = S.clubs[C().clubId].pids; ui.trainSel = (ui.trainSel || []).length === all.length ? [] : all.slice(); render(); },
+    'train-sel-u21': () => { ui.trainSel = S.clubs[C().clubId].pids.filter((id) => S.players[id].age <= 21); render(); },
+    'train-sel-clear': () => { ui.trainSel = []; render(); },
+    'train-auto-all': () => { const r = bulkTrain(S.clubs[C().clubId].pids, 'AUTO'); save(); render(); toast(`${r.n} players now train their best key attribute.`, 'good'); },
+    'train-rest-all': () => askConfirm('Clear the training focus of every player (including anyone learning a position)?', () => { bulkTrain(S.clubs[C().clubId].pids, 'REST'); save(); render(); }, 'Rest everyone'),
+    'train-bulk-apply': () => {
+      const v = $('#bulk-tf').value, r = bulkTrain(ui.trainSel || [], v);
+      save(); render();
+      toast(`Training updated for ${r.n} player${r.n === 1 ? '' : 's'}.${r.skip.length ? ` Skipped (not his attribute, or already maxed): ${r.skip.join(', ')}.` : ''}`, r.skip.length ? 'info' : 'good');
+    },
     'bulk-toggle': (id) => { const b = bulkSel(); ui.bulk = b.includes(id) ? b.filter((x) => x !== id) : b.concat(id); render(); },
     'bulk-all': () => { const all = S.clubs[C().clubId].pids; ui.bulk = bulkSel().length === all.length ? [] : all.slice(); render(); },
     'bulk-clear': () => { ui.bulk = []; render(); },
