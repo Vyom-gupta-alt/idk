@@ -3073,17 +3073,20 @@
     if (!t || t.season !== c.season) t = c.renew[pid] = { season: c.season };
     return t;
   }
-  function completeRenewal(pid) {
+  // quiet: used by bulk renewals; returns the reason as a string instead of showing a toast.
+  function completeRenewal(pid, quiet) {
     const c = C(), p = S.players[pid], a = renewTalk(pid).w?.agreed;
-    if (!a) return toast('Agree terms first.', 'bad');
-    if (wageBill() - (p.wage || 0) + a.wage > c.wageBudget) return toast('That wage does not fit your wage budget.', 'bad');
+    const fail = (m) => (quiet ? m : toast(m, 'bad'));
+    if (!a) return fail('Agree terms first.');
+    if (wageBill() - (p.wage || 0) + a.wage > c.wageBudget) return fail('That wage does not fit your wage budget.');
     const club = S.clubs[c.clubId], bonus = a.bonus || 0;
-    if (club.budget < bonus) return toast(`You need ${money(bonus)} in your budget for the signing-on fee.`, 'bad');
+    if (club.budget < bonus) return fail(`You need ${money(bonus)} in your budget for the signing-on fee.`);
     club.budget -= bonus;
     p.wage = a.wage; p.contract = c.season + a.years;
     p.relc = a.relc ? niceRound(playerValue(p) * a.relc) : 0;
     delete c.renew[pid];
     news(`✍️ ${p.name} signs a new contract until ${contractLabel(p)} on ${money(p.wage)} a week${bonus ? `, with a ${money(bonus)} signing-on fee` : ''}${p.relc ? `. Release clause ${money(p.relc)}` : '. No release clause'}.`, 'good');
+    if (quiet) return true;
     save();
     toast(`${p.name} has renewed his contract.`, 'good');
     return true;
@@ -3173,10 +3176,10 @@
     if (p.pos === 'GK' && me.pids.filter((id) => S.players[id].pos === 'GK').length <= 1) return 'You cannot sell your last goalkeeper.';
     return null;
   }
-  function sellPlayer(pid, clubId, amount) {
+  function sellPlayer(pid, clubId, amount, quiet) {
     const c = C(), p = S.players[pid], me = S.clubs[c.clubId];
     const err = canSell(p);
-    if (err) return toast(err, 'bad');
+    if (err) return quiet ? err : toast(err, 'bad');
     const buyer = S.clubs[clubId];
     creditSale(p, me.id, clubId, amount);
     if (buyer.id !== 'FA') buyer.budget -= amount;
@@ -3187,8 +3190,109 @@
     cleanLineup();
     c.transfers.unshift({ season: c.season, date: curDate(), pid, name: p.name, dir: 'out', club: buyer.name, fee: amount });
     news(amount ? `Sold ${p.name} to ${buyer.name} for ${money(amount)}.` : `Released ${p.name}.`, 'info');
+    if (quiet) return true;
     save();
     toast(amount ? `${p.name} sold to ${buyer.name} for ${money(amount)}.` : `${p.name} released.`, 'good');
+    return true;
+  }
+
+  /* --- Bulk actions: renew or sell several players at once --- */
+  const bulkSel = () => { const c = C(), ids = S.clubs[c.clubId].pids; ui.bulk = (ui.bulk || []).filter((id) => ids.includes(id)); return ui.bulk; };
+  const renewDemand = (p, years) => niceWage(wageAsk(p, 'renew') * yearsFactor(p, years));
+  function bulkRenewModal(ids) {
+    const c = C();
+    ui.bulkOpen = true;
+    ui.bulkRenew = ids = ids || ui.bulkRenew || [];
+    ui.bulkTerms = ui.bulkTerms || {};
+    const players = ids.map((id) => S.players[id]).filter((p) => p && p.clubId === c.clubId);
+    const room = c.wageBudget - wageBill();
+    const rows = players.map((p) => {
+      const t = renewTalk(p.id), w = t.w || {}, tm = ui.bulkTerms[p.id] || {};
+      const years = tm.years || w.lastYears || 3;
+      const wage = tm.wage || (w.counter && !w.agreed ? w.counter : w.lastOffer) || renewDemand(p, years);
+      const status = w.blocked ? '<span class="tag bad">Talks ended</span>' : w.status ? `<span class="tag ${w.status === 'accepted' ? 'good' : w.status === 'counter' ? 'warn' : 'bad'}">${esc({ accepted: 'Agreed', counter: 'Counter', rejected: 'Rejected', ended: 'Talks ended' }[w.status] || w.status)}</span>` : '';
+      return `<tr><td>${posBadge(p.pos)}</td><td class="left">${esc(p.name)} ${ovrBadge(p.ovr)}<div class="muted small">age ${p.age} · until <span class="${expiring(p) ? 'warn-t' : ''}">${contractLabel(p)}</span></div></td>
+        <td class="money muted">${money(p.wage)}</td><td class="money">~${money(renewDemand(p, years))}</td>
+        <td>${w.blocked ? '—' : `<input class="input xs" type="number" min="1" step="1" id="bw-${p.id}" value="${Math.round(wage / 1000)}">`}</td>
+        <td>${w.blocked ? '—' : `<select class="input sm" id="by-${p.id}">${[1, 2, 3, 4, 5].map((y) => `<option ${y === years ? 'selected' : ''}>${y}</option>`).join('')}</select>`}</td>
+        <td class="left small">${status}${w.msg && w.status !== 'accepted' ? `<div class="muted">${esc(w.msg)}</div>` : ''}</td></tr>`;
+    }).join('');
+    openModal(`<h2>✍️ Renew ${players.length} contract${players.length === 1 ? '' : 's'}</h2>
+      <p class="muted small">Set a weekly wage (€K) and length for each player, then offer them all at once. Anyone who accepts signs straight away if it fits your wage budget (room now: <strong class="money">${money(room)}</strong>/wk). Agents quietly take a little less than they ask; after 3 failed offers a player ends talks.</p>
+      ${ui.bulkMsg ? `<div class="notice info">${ui.bulkMsg}</div>` : ''}
+      <div class="tbl-wrap"><table class="tbl compact"><thead><tr><th>Pos</th><th class="left">Player</th><th>Now</th><th>Asks</th><th>Offer €K/wk</th><th>Years</th><th class="left">Status</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">No players.</td></tr>'}</tbody></table></div>
+      <div class="row gap wrap mt"><button class="btn primary" data-act="bulk-renew-offer">Offer contracts</button><button class="btn" data-act="bulk-renew-ask">Set every offer to what they ask</button><button class="btn ghost" data-act="close">Close</button></div>`, true);
+  }
+  function readBulkTerms() {
+    for (const id of ui.bulkRenew || []) {
+      const w = $('#bw-' + id), y = $('#by-' + id);
+      if (w && y) ui.bulkTerms[id] = { wage: Math.round((parseFloat(w.value) || 0) * 1000), years: parseInt(y.value, 10) || 3 };
+    }
+  }
+  function bulkRenewOffer() {
+    readBulkTerms();
+    let signed = 0, pending = 0;
+    const fails = [];
+    for (const id of ui.bulkRenew) {
+      const p = S.players[id], tm = ui.bulkTerms[id];
+      if (!p || p.clubId !== C().clubId || !tm || tm.wage <= 0) continue;
+      const t = renewTalk(id);
+      if (t.w?.blocked) continue;
+      if (!t.w?.agreed) {
+        const r = wageTalk(p, t, tm.wage, tm.years, 'renew');
+        Object.assign(t.w, { msg: r.msg, status: r.status, lastOffer: tm.wage, lastYears: tm.years });
+        if (r.status === 'counter') { tm.wage = t.w.counter; } // pre-fill the counter so the next offer agrees
+      }
+      if (t.w?.agreed) {
+        const res = completeRenewal(id, true);
+        if (res === true) { signed++; delete ui.bulkTerms[id]; ui.bulkRenew = ui.bulkRenew.filter((x) => x !== id); ui.bulk = (ui.bulk || []).filter((x) => x !== id); }
+        else fails.push([p.name, res]);
+      } else if (!t.w?.blocked) pending++;
+    }
+    save();
+    ui.bulkMsg = `${signed ? `✅ ${signed} contract${signed > 1 ? 's' : ''} signed. ` : ''}${pending ? `${pending} still negotiating: counter-offers are filled in, press Offer again to accept them. ` : ''}${fails.length ? `Not signed: ${groupFails(fails)}` : ''}` || 'Nothing to offer.';
+    if (signed) toast(`${signed} contract${signed > 1 ? 's' : ''} renewed.`, 'good');
+    bulkRenewModal();
+  }
+  function bulkSellModal(ids, refresh) {
+    const c = C(), win = windowInfo();
+    ui.bulkOpen = true;
+    const players = (ids || ui.bulkSellIds || []).map((id) => S.players[id]).filter((p) => p && p.clubId === c.clubId);
+    ui.bulkSellIds = players.map((p) => p.id);
+    if (refresh || !ui.bulkOffers) ui.bulkOffers = {};
+    for (const p of players) if (win.open && !(p.id in ui.bulkOffers)) ui.bulkOffers[p.id] = sellOffers(p)[0] || null;
+    const total = players.reduce((a, p) => a + (ui.bulkOffers[p.id]?.amount || 0), 0);
+    openModal(`<h2>💰 Sell ${players.length} player${players.length === 1 ? '' : 's'}</h2>
+      ${win.open ? `<p class="muted small">The best offer for each player. Accept them all at once; a sale is skipped if it would leave you under ${MIN_SQUAD} players or without a goalkeeper, or if the buyer can no longer afford it.</p>` : `<div class="notice">${esc(win.label)}. You can only release players until the window opens.</div>`}
+      ${ui.bulkMsg ? `<div class="notice info">${ui.bulkMsg}</div>` : ''}
+      <div class="tbl-wrap"><table class="tbl compact"><thead><tr><th>Pos</th><th class="left">Player</th><th>Value</th><th class="left">Best offer</th><th>Fee</th></tr></thead><tbody>
+        ${players.map((p) => { const o = ui.bulkOffers[p.id]; return `<tr><td>${posBadge(p.pos)}</td><td class="left">${esc(p.name)} ${ovrBadge(p.ovr)} <span class="muted small">age ${p.age}</span></td><td class="money muted">${money(playerValue(p))}</td><td class="left small">${o ? `${crest(S.clubs[o.clubId], 'sm')} ${esc(clubName(o.clubId))}` : `<span class="muted">${win.open ? 'No club can afford him' : '—'}</span>`}</td><td class="money">${o ? `<strong>${money(o.amount)}</strong>` : '—'}</td></tr>`; }).join('') || '<tr><td colspan="5" class="muted">No players.</td></tr>'}
+      </tbody></table></div>
+      ${win.open ? `<p class="small">Total: <strong class="money">${money(total)}</strong></p>` : ''}
+      <div class="row gap wrap mt">${win.open ? `<button class="btn primary" data-act="bulk-sell-do" ${total ? '' : 'disabled'}>Accept all offers</button><button class="btn ghost" data-act="bulk-sell-refresh">Ask around again</button>` : ''}<button class="btn ghost danger" data-act="bulk-release">Release all for free</button><button class="btn ghost" data-act="close">Close</button></div>`, true);
+  }
+  // "Name: reason" lines grouped by reason, so a repeated reason is shown once.
+  const groupFails = (fails) => { const g = {}; for (const [n, r] of fails) (g[r] = g[r] || []).push(n); return Object.entries(g).map(([r, ns]) => `${esc(r)} (${esc(ns.join(', '))})`).join(' · '); };
+  function bulkSell(release) {
+    const c = C();
+    let n = 0, fee = 0;
+    const fails = [];
+    for (const id of ui.bulkSellIds.slice()) {
+      const p = S.players[id];
+      if (!p || p.clubId !== c.clubId) continue;
+      const o = release ? { clubId: 'FA', amount: 0 } : ui.bulkOffers[id];
+      if (!o) continue;
+      const buyer = S.clubs[o.clubId];
+      if (!release && (buyer.budget < o.amount || buyer.pids.length >= MAX_SQUAD)) { fails.push([p.name, `${buyer.name} pulled out`]); delete ui.bulkOffers[id]; continue; }
+      const r = sellPlayer(id, o.clubId, o.amount, true);
+      if (r === true) { n++; fee += o.amount; ui.bulkSellIds = ui.bulkSellIds.filter((x) => x !== id); }
+      else fails.push([p.name, r]);
+    }
+    ui.bulk = bulkSel().filter((id) => S.players[id]?.clubId === c.clubId);
+    save();
+    if (n) toast(release ? `${n} player${n > 1 ? 's' : ''} released.` : `${n} player${n > 1 ? 's' : ''} sold for ${money(fee)}.`, 'good');
+    ui.bulkMsg = `${n ? `✅ ${release ? 'Released' : 'Sold'} ${n} player${n > 1 ? 's' : ''}${fee ? ` for ${money(fee)}` : ''}. ` : ''}${fails.length ? `Skipped: ${groupFails(fails)}` : ''}`;
+    if (ui.bulkSellIds.length) bulkSellModal(); else { closeModal(); render(); }
   }
   /* --- Loans: send a player out for a season to get games; he returns in the summer --- */
   const MAX_LOANS = 8;
@@ -3742,7 +3846,7 @@
     $('#modal .modal-box').classList.toggle('wide', !!wide);
     $('#modal').hidden = false;
   }
-  function closeModal() { $('#modal').hidden = true; $('#modal-body').innerHTML = ''; ui.neg = null; if (ui.playback && ui.playback.paused) resumePlayback(); }
+  function closeModal() { $('#modal').hidden = true; $('#modal-body').innerHTML = ''; ui.neg = null; if (ui.playback && ui.playback.paused) resumePlayback(); if (ui.bulkOpen) { ui.bulkOpen = false; render(); } }
 
   const ovrClass = (o) => (o >= 85 ? 'o-elite' : o >= 80 ? 'o-gold' : o >= 75 ? 'o-silver' : o >= 68 ? 'o-bronze' : 'o-low');
   const ovrBadge = (o) => `<span class="ovr ${ovrClass(o)}">${o}</span>`;
@@ -4008,7 +4112,7 @@
           return `<div class="offer"><div>${crest(S.clubs[o.clubId])} <strong>${esc(clubName(o.clubId))}</strong> bid <strong class="money">${money(o.amount)}</strong> for ${playerLink(p)} ${posBadge(p.pos)} ${ovrBadge(p.ovr)} ${potBadge(p)} <span class="muted small">(value ${money(playerValue(p))})</span></div>
           <div class="row gap"><button class="btn primary sm" data-act="accept-offer" data-id="${o.id}">Accept</button><button class="btn ghost sm" data-act="reject-offer" data-id="${o.id}">Reject</button></div></div>`;
         }).join('')}</section>` : ''}
-        ${(() => { const ex = squad.filter((p) => expiring(p)).sort((a, b) => b.ovr - a.ovr); return ex.length ? `<section class="card span2 offers"><h3>Contracts expiring this season</h3><p class="muted small">These players leave on a free transfer at the end of the season unless you agree new deals.</p><ul class="plist">${ex.map((p) => `<li>${posBadge(p.pos)} ${playerLink(p)} ${ovrBadge(p.ovr)} <span class="muted small">age ${p.age} · ${money(p.wage)}/wk</span><button class="btn xs primary ml-auto" data-act="renew" data-id="${p.id}">Negotiate</button></li>`).join('')}</ul></section>` : ''; })()}
+        ${(() => { const ex = squad.filter((p) => expiring(p)).sort((a, b) => b.ovr - a.ovr); return ex.length ? `<section class="card span2 offers"><h3>Contracts expiring this season${ex.length > 1 ? ` <button class="btn xs primary ml-auto" data-act="bulk-renew-exp">Renew all ${ex.length}</button>` : ''}</h3><p class="muted small">These players leave on a free transfer at the end of the season unless you agree new deals.</p><ul class="plist">${ex.map((p) => `<li>${posBadge(p.pos)} ${playerLink(p)} ${ovrBadge(p.ovr)} <span class="muted small">age ${p.age} · ${money(p.wage)}/wk</span><button class="btn xs primary ml-auto" data-act="renew" data-id="${p.id}">Negotiate</button></li>`).join('')}</ul></section>` : ''; })()}
         <section class="card">
           <h3>Your competitions <button class="link small" data-act="tab" data-id="comps">All competitions →</button></h3>
           <ul class="plist">${userCompIds().map((id) => { const comp = c.comps[id]; return `<li><button class="link" data-act="comp-go" data-id="${id}">${compTag(comp)} ${esc(comp.name)}</button><span class="ml-auto small">${esc(compStatus(comp, uid))}</span></li>`; }).join('')}</ul>
@@ -4654,6 +4758,7 @@
     const selPos = ui.squadSel !== null && slots[ui.squadSel] ? slots[ui.squadSel][0] : null;
     const th = (k, l, cls = '') => `<th class="${cls} sortable ${ui.squadSort === k ? 'on' : ''}" data-act="squad-sort" data-id="${k}">${l}</th>`;
     const bill = wageBill();
+    const bulk = bulkSel(), expCount = players.filter((p) => expiring(p)).length;
     return `
       <div class="grid g-squad">
         <section class="card">
@@ -4679,11 +4784,12 @@
         </section>
         <section class="card">
           <h3>Squad <span class="muted small">${club.pids.length}/${MAX_SQUAD} players · wages ${money(bill)}/wk of ${money(c.wageBudget)}</span></h3>
+          <div class="bulk-bar row gap wrap">${bulk.length ? `<strong>${bulk.length} selected</strong><button class="btn sm primary" data-act="bulk-renew">✍️ Renew contracts</button><button class="btn sm" data-act="bulk-sell">💰 Sell</button><button class="btn sm ghost" data-act="bulk-clear">Clear</button>` : '<span class="muted small">Tick players to renew or sell several at once.</span>'}${expCount ? `<button class="btn sm ghost" data-act="bulk-expiring">Select expiring (${expCount})</button>` : ''}</div>
           <div class="tbl-wrap"><table class="tbl squad-tbl"><thead><tr>
-            ${th('pos', 'Pos')}<th class="left">Name</th>${th('age', 'Age')}${th('ovr', 'OVR')}${th('pot', 'POT')}${selPos ? `<th title="Rating in ${selPos}">@${selPos}</th>` : ''}<th>Form</th><th>Apps</th>${th('goals', 'G')}<th>A</th>${th('rating', 'Avg')}${th('value', 'Value')}${th('wage', 'Wage')}<th>Contract</th><th></th>
+            <th><input type="checkbox" data-act="bulk-all" title="Select all" ${bulk.length && bulk.length === club.pids.length ? 'checked' : ''}></th>${th('pos', 'Pos')}<th class="left">Name</th>${th('age', 'Age')}${th('ovr', 'OVR')}${th('pot', 'POT')}${selPos ? `<th title="Rating in ${selPos}">@${selPos}</th>` : ''}<th>Form</th><th>Apps</th>${th('goals', 'G')}<th>A</th>${th('rating', 'Avg')}${th('value', 'Value')}${th('wage', 'Wage')}<th>Contract</th><th></th>
           </tr></thead><tbody>
           ${players.map((p) => `<tr class="${lineupSet.has(p.id) ? 'starter' : ''} ${selPos ? 'pickable' : ''} ${!available(p) ? 'unavail' : ''}" ${selPos ? `data-act="assign" data-id="${p.id}"` : ''}>
-            <td>${posBadge(p.pos)}</td>
+            <td><input type="checkbox" data-act="bulk-toggle" data-id="${p.id}" ${bulk.includes(p.id) ? 'checked' : ''} aria-label="Select ${esc(p.name)}"></td><td>${posBadge(p.pos)}</td>
             <td class="left name-cell">${lineupSet.has(p.id) ? '<span class="xi-dot" title="In your XI"></span>' : ''}${selPos ? esc(p.name) : playerLink(p)} ${statusIcons(p)} ${genTag(p)}</td>
             <td>${p.age}</td><td>${ovrBadge(p.ovr)}${delta(p)}</td><td>${potBadge(p)}</td>
             ${selPos ? `<td><strong class="${pfit(p, selPos) < 0 ? 'warn-t' : ''}">${eff(p, selPos)}</strong></td>` : ''}
@@ -5489,6 +5595,18 @@
     assign: (id) => { if (ui.squadSel !== null) assignToSlot(ui.squadSel, id); },
     'auto-pick': () => { const c = C(); c.lineup = bestXI(S.clubs[c.clubId].pids, c.formation); cleanLineup(); ui.squadSel = null; save(); render(); toast('Best available XI selected. It stays until you change it.', 'good'); },
     'squad-sort': (id) => { ui.squadSort = id; render(); },
+    'bulk-toggle': (id) => { const b = bulkSel(); ui.bulk = b.includes(id) ? b.filter((x) => x !== id) : b.concat(id); render(); },
+    'bulk-all': () => { const all = S.clubs[C().clubId].pids; ui.bulk = bulkSel().length === all.length ? [] : all.slice(); render(); },
+    'bulk-clear': () => { ui.bulk = []; render(); },
+    'bulk-expiring': () => { ui.bulk = S.clubs[C().clubId].pids.filter((id) => expiring(S.players[id])); render(); },
+    'bulk-renew': () => { ui.bulkMsg = null; ui.bulkTerms = {}; bulkRenewModal(bulkSel().slice()); },
+    'bulk-renew-exp': () => { ui.bulkMsg = null; ui.bulkTerms = {}; bulkRenewModal(S.clubs[C().clubId].pids.filter((id) => expiring(S.players[id]))); },
+    'bulk-renew-offer': () => bulkRenewOffer(),
+    'bulk-renew-ask': () => { readBulkTerms(); for (const id of ui.bulkRenew) { const p = S.players[id], tm = ui.bulkTerms[id]; if (p && tm) tm.wage = renewDemand(p, tm.years); } ui.bulkMsg = null; bulkRenewModal(); },
+    'bulk-sell': () => { ui.bulkMsg = null; bulkSellModal(bulkSel().slice(), true); },
+    'bulk-sell-refresh': () => { ui.bulkMsg = null; bulkSellModal(null, true); },
+    'bulk-sell-do': () => bulkSell(false),
+    'bulk-release': () => { const ids = ui.bulkSellIds.slice(); askConfirm(`Release ${ids.length} player${ids.length > 1 ? 's' : ''} for free?`, () => { ui.bulkSellIds = ids; bulkSell(true); }, 'Release'); },
     sell: (id) => sellModal(id),
     'refresh-offers': (id) => sellModal(id),
     loan: (id) => loanModal(id),
