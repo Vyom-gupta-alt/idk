@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenScore — Free SAT & ACT Prep</title>
+<meta name="description" content="Free SAT and ACT prep: question bank, Desmos regression strategies, adaptive mock exams, diagnostics, vocab builder and a study assistant. Every feature free, no credit card.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23ff6b2c'/><text x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'>OS</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <a href="#/" class="logo"><span class="logo-mark">OS</span>OpenScore</a>
+    <nav class="nav" id="nav">
+      <a href="#/practice" data-route="practice">Question Bank</a>
+      <a href="#/infinite" data-route="infinite">Infinite Math</a>
+      <a href="#/daily" data-route="daily">Daily</a>
+      <a href="#/mock" data-route="mock">Mock Exams</a>
+      <a href="#/vocab" data-route="vocab">Vocab</a>
+      <a href="#/learn" data-route="learn">Course</a>
+      <a href="#/tutor" data-route="tutor">Tutor</a>
+      <a href="#/progress" data-route="progress">Progress</a>
+    </nav>
+    <div class="header-actions">
+      <span class="streak-pill" id="streakPill" title="Daily question streak">🔥 0</span>
+      <button class="icon-btn" id="themeBtn" aria-label="Toggle color theme">◐</button>
+      <button class="icon-btn menu-btn" id="menuBtn" aria-label="Open menu">☰</button>
+    </div>
+  </div>
+</header>
+
+<main id="app" class="wrap" tabindex="-1"></main>
+
+<button class="btn brand calc-fab" id="calcFab" aria-expanded="false" aria-controls="calcDrawer">ƒ(x) Desmos</button>
+<div class="calc-drawer hidden" id="calcDrawer" role="dialog" aria-label="Desmos graphing calculator">
+  <div class="calc-head">
+    <strong>Desmos Graphing Calculator</strong>
+    <span class="spacer"></span>
+    <a class="btn sm ghost" href="https://www.desmos.com/calculator" target="_blank" rel="noopener">Open full ↗</a>
+    <button class="icon-btn" id="calcClose" aria-label="Close calculator">✕</button>
+  </div>
+  <div id="calculator"></div>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap row">
+    <span>© <span id="year"></span> OpenScore. Free forever. Your progress is saved in this browser only.</span>
+    <span class="spacer"></span>
+    <span>SAT® and ACT® are trademarks of their owners, who are not affiliated with this site.</span>
+  </div>
+</footer>
+
+<script src="js/data-questions.js"></script>
+<script src="js/data-vocab.js"></script>
+<script src="js/data-lessons.js"></script>
+<script src="js/generator.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
