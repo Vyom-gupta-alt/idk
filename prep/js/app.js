@@ -786,15 +786,22 @@
       if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Click again to erase everything'; b.classList.add('danger'); return; }
       Store.reset(); updateStreak(); views.progress(); toast('Progress erased');
     });
-    $('#exportBtn').addEventListener('click', () => {
-      if (IN_CLAUDE) { copyText(JSON.stringify(Store.data)); return; }
-      const blob = new Blob([JSON.stringify(Store.data, null, 2)], { type: 'application/json' });
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'openscore-progress.json'; a.click();
+    $('#exportBtn').addEventListener('click', async () => {
+      const json = JSON.stringify(Store.data, null, 2);
+      if (IN_CLAUDE) {
+        const dl = await window.claude.use('downloads').catch(() => null);
+        if (!dl) { copyText(json); return; }
+        try { await dl.save({ filename: 'openscore-progress.json', data: json }); toast('Progress saved'); }
+        catch (e) { if (!e || e.code !== 'cancelled') copyText(json); }
+        return;
+      }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' })); a.download = 'openscore-progress.json'; a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     });
   };
 
-  /* Atlas tutor: an offline, rule-based study assistant. */
+  /* Atlas tutor: built-in commands everywhere; Claude-backed answers when the viewer provides `sample`. */
   views.tutor = () => {
     let pending = null, busy = false, ctl = null;
     const history = []; // plain-text turns for the AI
