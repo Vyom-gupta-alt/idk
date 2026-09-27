@@ -180,5 +180,69 @@ window.LESSONS = [
       { t: 'p', v: 'ACT math questions roughly increase in difficulty. Aim to finish the first 30 in about 25 minutes so you have extra time for the hardest ones at the end.' },
       { t: 'tip', v: 'The ACT allows many graphing calculators. Learn the regression features on yours, or practice with Desmos here.' }
     ]
+  },
+  /* ───────── More modules ───────── */
+  {
+    id: 'd9', track: 'Desmos Mastery', title: 'Backsolving with tables', mins: 7,
+    summary: 'Test all four answer choices at once.',
+    body: [
+      { t: 'p', v: 'When the answer choices are numbers, define the expression as a function and put the choices in a table. Desmos evaluates every choice at the same time.' },
+      { t: 'steps', v: [
+        'Type the equation as a function of x, e.g. f(x) = √(2x+7) − (x+2).',
+        'Add a table with x₁ = the answer choices.',
+        'In the second column type f(x₁). The choice that gives 0 is correct.'
+      ]},
+      { t: 'code', v: 'f(x) = √(2x+7) − (x+2)' }
+    ]
+  },
+  {
+    id: 'm1', track: 'SAT Math Strategy', title: 'Read the last line first', mins: 5,
+    summary: 'Know what you are solving for before you start.',
+    body: [
+      { t: 'p', v: 'Many wrong answers on the SAT come from solving for x when the question asks for 2x, x + y, or a value of a function. Read the final sentence first and underline what is being asked.' },
+      { t: 'tip', v: 'If a question asks for 6x − 4 and gives 3x + 7, look for a shortcut: 6x is just 2(3x).' }
+    ]
+  },
+  {
+    id: 'm2', track: 'SAT Math Strategy', title: 'Structure over computation', mins: 9,
+    summary: 'Sum/product of roots, difference of squares, and other shortcuts.',
+    body: [
+      { t: 'steps', v: [
+        'Sum of roots of ax² + bx + c is −b/a; product is c/a.',
+        'x² − y² = (x + y)(x − y): if you know two of these, you know the third.',
+        'Vertex x-coordinate is −b/(2a).',
+        'No solution for a linear system = same slope, different intercept. Infinitely many = same line.',
+        'One solution for a quadratic = discriminant b² − 4ac = 0.'
+      ]}
+    ]
+  },
+  {
+    id: 'r5', track: 'SAT Reading & Writing', title: 'Command of evidence', mins: 8,
+    summary: 'The right quote proves the exact claim, and all of it.',
+    body: [
+      { t: 'steps', v: [
+        'Break the claim into its parts (e.g. "isolated" + "in a crowded city").',
+        'The correct choice supports every part. Many wrong choices support only one.',
+        'For data questions, the answer must match the numbers exactly. Watch for choices that overstate ("always," "guarantees").'
+      ]}
+    ]
+  },
+  {
+    id: 'r6', track: 'SAT Reading & Writing', title: 'Cross-text questions', mins: 7,
+    summary: 'Summarize each text in one line before reading the choices.',
+    body: [
+      { t: 'p', v: 'Write a five-word summary of each text\'s position. Then decide whether Text 2 agrees, disagrees, or adds a qualification to Text 1. Most answers are a "qualified disagreement": the evidence doesn\'t fully support the other author\'s claim.' }
+    ]
+  },
+  {
+    id: 'a4', track: 'ACT Strategy', title: 'ACT Reading: passage mapping', mins: 8,
+    summary: 'Skim for structure, then hunt for evidence.',
+    body: [
+      { t: 'steps', v: [
+        'Spend about 3 minutes skimming each passage and noting the main idea of each paragraph.',
+        'For detail questions, go back to the text. Don\'t answer from memory.',
+        'Wrong answers are often true statements that don\'t answer the question.'
+      ]}
+    ]
   }
 ];

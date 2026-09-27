@@ -8,23 +8,23 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23ff6b2c'/><text x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'>OS</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
 
 <header class="site-header">
   <div class="wrap">
-    <a href="#/" class="logo"><span class="logo-mark">OS</span>OpenScore</a>
+    <a href="#home" class="logo"><span class="logo-mark">OS</span>OpenScore</a>
     <nav class="nav" id="nav">
-      <a href="#/practice" data-route="practice">Question Bank</a>
-      <a href="#/infinite" data-route="infinite">Infinite Math</a>
-      <a href="#/daily" data-route="daily">Daily</a>
-      <a href="#/mock" data-route="mock">Mock Exams</a>
-      <a href="#/vocab" data-route="vocab">Vocab</a>
-      <a href="#/learn" data-route="learn">Course</a>
-      <a href="#/tutor" data-route="tutor">Tutor</a>
-      <a href="#/progress" data-route="progress">Progress</a>
+      <a href="#practice" data-route="practice">Question Bank</a>
+      <a href="#infinite" data-route="infinite">Infinite Math</a>
+      <a href="#daily" data-route="daily">Daily</a>
+      <a href="#mock" data-route="mock">Mock Exams</a>
+      <a href="#vocab" data-route="vocab">Vocab</a>
+      <a href="#learn" data-route="learn">Course</a>
+      <a href="#tutor" data-route="tutor">Tutor</a>
+      <a href="#progress" data-route="progress">Progress</a>
     </nav>
     <div class="header-actions">
       <span class="streak-pill" id="streakPill" title="Daily question streak">🔥 0</span>
@@ -44,6 +44,7 @@
     <a class="btn sm ghost" href="https://www.desmos.com/calculator" target="_blank" rel="noopener">Open full ↗</a>
     <button class="icon-btn" id="calcClose" aria-label="Close calculator">✕</button>
   </div>
+  <div class="calc-exprs" id="calcExprs" hidden></div>
   <div id="calculator"></div>
 </div>
 
@@ -56,7 +57,9 @@
 </footer>
 
 <script src="js/data-questions.js"></script>
+<script src="js/data-questions-2.js"></script>
 <script src="js/data-vocab.js"></script>
+<script src="js/data-vocab-2.js"></script>
 <script src="js/data-lessons.js"></script>
 <script src="js/generator.js"></script>
 <script src="js/app.js"></script>

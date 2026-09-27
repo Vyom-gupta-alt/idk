@@ -41,7 +41,8 @@ A second site lives in [`prep/`](prep/): a free SAT/ACT prep platform. Every fea
 - **Infinite Math**: procedurally generated SAT math (linear, systems, quadratics, quadratic regression, exponentials, percents, circles, and more). Every generated question has a worked answer.
 - **Adaptive mock exams**: timed SAT Math (Module 2 routes harder or easier based on Module 1), SAT R&W, and ACT mixed. Scored with a full answer review.
 - **Diagnostics**: accuracy by domain, predicted SAT (400–1600) and ACT (1–36) scores, and a study path built from your weakest domains.
-- **Daily question** with streak tracking, a **vocab builder** (flashcards and quiz), **course modules** (Desmos regression techniques, SAT R&W, ACT strategy), and **Atlas**, a rule-based study tutor that runs in the browser.
+- **Daily question** with streak tracking, a **vocab builder** (flashcards and quiz), and **course modules** (Desmos regression techniques, SAT math strategy, SAT R&W, ACT strategy).
+- **Atlas tutor**: built-in commands (generated practice, hints, definitions, study plan, score prediction) everywhere. When the page runs as a claude.ai artifact it also uses Claude for open questions, writes new Reading & Writing / ACT questions, and explains mistakes.
 - Built-in **Desmos calculator** drawer.
 
 ## Run
@@ -52,4 +53,4 @@ cd prep && python3 -m http.server 8000   # then open http://localhost:8000
 ## Add content
 - Questions: `prep/js/data-questions.js` (schema documented at the top of the file)
 - Vocab: `prep/js/data-vocab.js` · Lessons: `prep/js/data-lessons.js` · Generators: `prep/js/generator.js`
-- The Desmos embed uses Desmos's public **demo** API key (`DESMOS_KEY` in `prep/js/app.js`). Get your own key from https://www.desmos.com/api before deploying publicly.
+- The calculator drawer embeds desmos.com/calculator, so no key is needed. With a Desmos API key (`DESMOS_KEY` in `prep/js/app.js`) it can pre-fill expressions from lessons.
