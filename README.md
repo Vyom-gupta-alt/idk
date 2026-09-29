@@ -29,3 +29,10 @@ python3 -m http.server 8000
 ```
 
 Then visit `http://localhost:8000`.
+
+---
+
+## ReelGuard (Android app)
+
+This repository also contains **ReelGuard**, an Android app that blocks Instagram's Reels feed
+while still allowing messages and Reels friends send you. See [`reelguard/README.md`](reelguard/README.md).

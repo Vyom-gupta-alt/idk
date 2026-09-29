@@ -149,6 +149,7 @@ class ReelGuardAccessibilityService : AccessibilityService(), GuardEngine.Sink {
                     scheduleClassify()
                     scheduleHeartbeatIfNeeded()
                 }
+                else -> Unit // not subscribed in the service config
             }
             AppKind.INSTAGRAM_LITE, AppKind.EXTRA_CLIENT -> {
                 if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
