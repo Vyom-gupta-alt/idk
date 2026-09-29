@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shield with a pause mark: "protection" + "stop the feed". 108dp adaptive canvas. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,28 L76,36 L76,54 C76,67 66,77 54,81 C42,77 32,67 32,54 L32,36 Z" />
+    <path
+        android:fillColor="#FF2F6A4F"
+        android:pathData="M46,44 h6 v22 h-6 z M56,44 h6 v22 h-6 z" />
+</vector>

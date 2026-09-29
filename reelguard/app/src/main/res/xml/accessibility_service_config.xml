@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Scope of the accessibility service. Android enforces packageNames: events from any
+  other app are never delivered to ReelGuard. The list is kept in sync at runtime with
+  the user's "other apps to block" setting via setServiceInfo().
+
+  Event types: only window changes, content changes (throttled in code) and scrolls.
+  flagReportViewIds is required to see view ids such as "clips_tab".
+  isAccessibilityTool="false": ReelGuard is a digital-wellbeing tool, not an
+  accessibility tool, and declares so honestly (Google Play policy).
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewScrolled"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/accessibility_service_description"
+    android:isAccessibilityTool="false"
+    android:notificationTimeout="100"
+    android:packageNames="com.instagram.android,com.instagram.lite"
+    android:settingsActivity="com.reelguard.app.MainActivity" />

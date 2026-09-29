@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ReelGuard</string>
+    <string name="accessibility_service_label">ReelGuard Reels protection</string>
+    <string name="accessibility_service_description">ReelGuard recognises which Instagram screen is open (for example the Reels tab, the Reels player or your messages) so it can block the Reels feed while letting Reels shared in messages play. It only receives events from Instagram, Instagram Lite and apps you add yourself. It reads internal screen-element names and selection state, never your messages, text or passwords. Nothing is stored except daily totals, and nothing leaves your phone: the app has no internet access.</string>
+</resources>
