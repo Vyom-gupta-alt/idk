@@ -29,3 +29,9 @@ python3 -m http.server 8000
 ```
 
 Then visit `http://localhost:8000`.
+
+---
+
+## Habitual (habit tracker app)
+
+`habit-tracker/` contains a separate cross-platform habit tracker built with Expo / React Native for iOS, Android and web. See [`habit-tracker/README.md`](habit-tracker/README.md).
