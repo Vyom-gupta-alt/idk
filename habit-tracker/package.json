@@ -36,7 +36,8 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types src/lib/__tests__/*.test.ts",
-    "build:web": "expo export --platform web"
+    "build:web": "expo export --platform web",
+    "build:artifact": "node scripts/build-artifact.mjs"
   },
   "private": true
 }

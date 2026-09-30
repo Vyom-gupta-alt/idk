@@ -8,6 +8,7 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useReminderSync } from '@/hooks/useReminderSync';
 import { useTheme } from '@/hooks/useTheme';
 import { ShortcutHelp } from '@/components/ShortcutHelp';
+import { DialogHost } from '@/components/DialogHost';
 
 export default function RootLayout() {
   const hydrated = useHydration();
@@ -42,6 +43,7 @@ export default function RootLayout() {
         </View>
       )}
       <ShortcutHelp visible={helpOpen} onClose={() => setHelpOpen(false)} />
+      <DialogHost />
     </SafeAreaProvider>
   );
 }

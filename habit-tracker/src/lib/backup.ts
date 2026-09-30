@@ -1,5 +1,6 @@
 import { Platform, Share } from 'react-native';
 import type { HabitData } from '@/store/habitStore';
+import { claudeUse } from '@/lib/claudeHost';
 
 export const BACKUP_VERSION = 1;
 
@@ -31,10 +32,17 @@ export function parseBackup(text: string): HabitData {
 export async function exportBackup(data: HabitData): Promise<void> {
   const json = serializeBackup(data);
   if (Platform.OS === 'web') {
+    const filename = `habitual-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    // Inside a Claude artifact, page-initiated downloads are blocked; ask the host.
+    const downloads = await claudeUse<{ save(r: { filename: string; data: string }): Promise<unknown> }>('downloads');
+    if (downloads) {
+      await downloads.save({ filename, data: json }).catch(() => {});
+      return;
+    }
     const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = `habitual-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
     return;

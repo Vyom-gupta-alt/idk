@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Modal, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import { useHabitStore } from '@/store/habitStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { storageBackend, type StorageBackend } from '@/store/storage';
 import { useTheme } from '@/hooks/useTheme';
 import { useResponsive } from '@/hooks/useResponsive';
 import { ensurePermission, notificationsSupported } from '@/lib/notifications';
@@ -21,6 +22,10 @@ export default function Settings() {
   const habits = useHabitStore((s) => s.habits);
   const { moveHabit, setArchived, deleteHabit, importData, loadDemoData, resetAll } = useHabitStore.getState();
   const [importOpen, setImportOpen] = useState(false);
+  const [backend, setBackend] = useState<StorageBackend | null>(null);
+  useEffect(() => {
+    storageBackend().then(setBackend);
+  }, []);
 
   const sorted = useMemo(() => [...habits].sort((a, b) => a.order - b.order), [habits]);
   const active = sorted.filter((h) => !h.archived);
@@ -65,7 +70,7 @@ export default function Settings() {
         subtitle={
           notificationsSupported
             ? 'Master switch for every habit reminder on this device.'
-            : 'Reminders are local notifications on the iOS and Android apps. Settings sync once you open the app on your phone.'
+            : "Phone notifications need the iOS or Android app. The web version saves your reminder times but can't send alerts."
         }
       >
         <Toggle
@@ -120,7 +125,12 @@ export default function Settings() {
     <Card style={{ gap: space.md }}>
       <T variant="heading">Data</T>
       <T variant="caption" tone="secondary">
-        Everything is stored locally on this device ({habits.length} habit{habits.length === 1 ? '' : 's'}). Export a backup to move between devices.
+        {habits.length} habit{habits.length === 1 ? '' : 's'}.{' '}
+        {backend === 'claude'
+          ? 'Saved privately to your Claude account, so it syncs wherever you open this page.'
+          : backend === 'browser'
+            ? 'Saved in this browser only. Export a backup to move to another device.'
+            : 'Stored locally on this device. Export a backup to move to another device.'}
       </T>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
         <Button label="Export backup" icon="download-outline" variant="secondary" onPress={() => exportBackup(useHabitStore.getState())} />

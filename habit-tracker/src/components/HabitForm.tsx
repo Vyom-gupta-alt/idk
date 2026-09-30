@@ -221,7 +221,7 @@ export function HabitForm({
       <Card style={{ gap: space.sm }}>
         <SettingRow
           title="Daily reminder"
-          subtitle={notificationsSupported ? 'A local notification on the days this habit is scheduled.' : 'Reminders are delivered on the iOS and Android apps.'}
+          subtitle={notificationsSupported ? 'A local notification on the days this habit is scheduled.' : 'Saved here. Alerts are sent by the iOS and Android apps.'}
         >
           <Toggle
             label="Daily reminder"
