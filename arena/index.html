@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Crown Clash</title>
+<meta name="description" content="Real-time tower-battle strategy game: spend elixir on troops and spells, crack towers, win crowns.">
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ Home ============ -->
+<section class="screen" id="screen-home">
+  <header class="home-head">
+    <h1>Crown <span>Clash</span></h1>
+    <div class="wallet">
+      <span title="Trophies">🏆 <b id="homeTrophies">0</b></span>
+      <span title="Gold">🪙 <b id="homeGold">0</b></span>
+      <span title="Star Points">✨ <b id="homeStars">0</b></span>
+    </div>
+  </header>
+  <div class="panel arena-card">
+    <div><span class="dim">Arena</span><h2 id="homeArena">Training Grounds</h2></div>
+    <div class="right"><span class="dim">Record</span><div id="homeRecord"></div><span class="dim">Queue population: <b id="homeQueue"></b></span></div>
+  </div>
+  <div class="panel">
+    <div class="panel-head"><h3>Battle Deck</h3><button class="btn ghost" id="btnDeck">Edit deck</button></div>
+    <div class="deck-row" id="homeDeck"></div>
+    <p class="warn" id="homeDeckWarn"></p>
+  </div>
+  <div class="mode-grid">
+    <button class="mode primary" id="btnLadder"><span class="mode-icon">⚔️</span><b>Battle</b><small>1v1 Ladder · trophies on the line</small></button>
+    <button class="mode" id="btn2v2"><span class="mode-icon">🤝</span><b>2v2</b><small>Team up with an ally</small></button>
+    <button class="mode" id="btnTraining"><span class="mode-icon">🎯</span><b>Training Camp</b><small>Offline sandbox vs fixed bots</small></button>
+    <button class="mode" id="btnPractice"><span class="mode-icon">🔁</span><b>Practice Matches</b><small><span id="practiceCount">0</span> saved rematches</small></button>
+    <button class="mode" id="btnCollection"><span class="mode-icon">📚</span><b>Collection</b><small>Upgrade cards · Star levels</small></button>
+  </div>
+  <details class="panel rules">
+    <summary>How to play</summary>
+    <ul>
+      <li>Destroy enemy towers to earn crowns. Destroying the <b>King Tower</b> is an instant three-crown win.</li>
+      <li>The King Tower sleeps (💤) until something damages it — then its cannon joins the fight for the rest of the match.</li>
+      <li>Elixir regenerates 1 every 2.8s up to 10. <b>Double</b> in the final minute, <b>triple</b> in overtime.</li>
+      <li>3 minutes of regulation. If crowns are tied, up to 2 minutes of sudden-death overtime: first tower down wins. Still tied? The side whose weakest tower has the lowest HP loses.</li>
+      <li>Click a card then the arena (or drag it). Keys <kbd>1</kbd>–<kbd>4</kbd> pick cards, <kbd>A</kbd> fires your Hero's ability, <kbd>Esc</kbd> cancels.</li>
+      <li>Cheap defenses against expensive pushes win elixir trades — watch your trade counter.</li>
+    </ul>
+  </details>
+</section>
+
+<!-- ============ Deck builder ============ -->
+<section class="screen" id="screen-deck">
+  <header class="sub-head"><button class="btn ghost" data-home>← Back</button><h2>Deck Builder</h2><span class="dim">Avg elixir <b id="deckAvg">0</b></span></header>
+  <div class="panel">
+    <div class="deck-slots" id="deckSlots"></div>
+    <p id="deckStatus"></p>
+  </div>
+  <div class="deck-layout">
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Cards</h3>
+        <div class="row-btns">
+          <select id="deckFilter">
+            <option value="all">All</option>
+            <option value="win">Win conditions</option>
+            <option value="spell">Spells</option>
+            <option value="support">Support</option>
+            <option value="defense">Defense</option>
+            <option value="swarm">Swarm</option>
+            <option value="evo">Evolutions</option>
+            <option value="hero">Heroes</option>
+          </select>
+          <select id="deckPreset"></select>
+        </div>
+      </div>
+      <div class="pool" id="deckPool"></div>
+    </div>
+    <div class="panel info" id="deckInfo"></div>
+  </div>
+</section>
+
+<!-- ============ Collection ============ -->
+<section class="screen" id="screen-collection">
+  <header class="sub-head"><button class="btn ghost" data-home>← Back</button><h2>Collection</h2><span>🪙 <b id="colGold">0</b> · ✨ <b id="colStars">0</b></span></header>
+  <div class="col-grid" id="colGrid"></div>
+  <div class="panel">
+    <h3>Rarity &amp; upgrades</h3>
+    <p class="dim">Rarity controls scarcity, not power. Every level adds ~10% hitpoints and damage up to Level 16. Taking one card from 1 to 16 costs <b id="goldTotal"></b> gold plus:</p>
+    <table class="stats"><thead><tr><th>Rarity</th><th>Total copies 1→16</th><th>Copies for your next level (from 9)</th></tr></thead><tbody id="rarityTable"></tbody></table>
+    <p class="dim">Max-level cards unlock cosmetic Star Levels (gold weapon, aura, spawn effect) bought with Star Points. They never change stats.</p>
+    <div class="row-btns">
+      <button class="btn ghost" id="btnSandbox">Sandbox: grant resources</button>
+      <button class="btn ghost danger" id="btnReset">Reset progress</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Training & Practice ============ -->
+<section class="screen" id="screen-training">
+  <header class="sub-head"><button class="btn ghost" data-home>← Back</button><h2>Training Camp</h2><span></span></header>
+  <p class="dim pad">Offline practice against fixed AI trainers using your current deck. No trophies at stake.</p>
+  <div class="panel" id="trainingList"></div>
+</section>
+
+<section class="screen" id="screen-practice">
+  <header class="sub-head"><button class="btn ghost" data-home>← Back</button><h2>Practice Matches</h2><span></span></header>
+  <p class="dim pad">Replay opponents who beat you on the ladder — same deck, same card levels — with nothing at stake.</p>
+  <div class="panel" id="practiceList"></div>
+</section>
+
+<!-- ============ Matchmaking ============ -->
+<section class="screen" id="screen-queue">
+  <div class="queue">
+    <div class="spinner"></div>
+    <h2 id="queueStatus">Searching…</h2>
+    <p class="dim" id="queueTime">0.0s</p>
+    <p class="found" id="queueFound"></p>
+    <button class="btn ghost" data-home>Cancel</button>
+  </div>
+</section>
+
+<!-- ============ Battle ============ -->
+<section class="screen" id="screen-battle">
+  <div class="battle-top">
+    <div class="side red"><span id="oppName"></span><span id="crownsOpp" class="crowns"></span></div>
+    <div class="clock-box"><div id="clock">3:00</div><div id="phase" class="phase"></div></div>
+    <div class="side blue"><span id="crownsMe" class="crowns"></span><span id="meName"></span></div>
+  </div>
+  <div class="arena-wrap"><canvas id="arena"></canvas></div>
+  <div class="battle-hud">
+    <div class="hud-row">
+      <span class="mode-label" id="modeLabel"></span>
+      <div class="abilities" id="abilities"></div>
+      <span class="trade-box" title="Enemy elixir destroyed minus your elixir lost">Trade <b id="trade">+0.0</b></span>
+    </div>
+    <div class="hud-row hand-row">
+      <div class="next"><small>Next</small><span id="nextCard"></span></div>
+      <div class="hand" id="hand"></div>
+      <div class="hud-side">
+        <div class="emote-wrap"><button class="btn ghost small" id="emoteBtn">😀</button><div class="emotes" id="emotes"></div></div>
+        <button class="btn ghost small danger" id="btnForfeit">🏳️</button>
+      </div>
+    </div>
+    <div class="elixir"><div class="elixir-fill" id="elixirFill"></div><div class="elixir-ticks"></div><span class="elixir-num">💧 <b id="elixirNum">5</b></span></div>
+  </div>
+</section>
+
+<!-- ============ Result ============ -->
+<section class="screen" id="screen-result">
+  <div class="result panel">
+    <h1 id="resultTitle">Victory!</h1>
+    <div class="result-crowns" id="resultCrowns"></div>
+    <p class="dim" id="resultReason"></p>
+    <div class="rewards" id="resultRewards"></div>
+    <table class="stats result-stats" id="resultStats"></table>
+    <p class="dim small-note" id="resultNote"></p>
+    <div class="row-btns center">
+      <button class="btn ghost" id="btnRematch">Rematch</button>
+      <button class="btn primary" id="btnResultHome">Continue</button>
+    </div>
+  </div>
+</section>
+
+<div class="modal" id="modal"><div class="modal-box"><button class="modal-x" data-close>✕</button><div id="modalBody"></div></div></div>
+<div class="toast" id="toast"></div>
+
+<script src="js/data.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/render.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
