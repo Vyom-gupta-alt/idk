@@ -548,6 +548,23 @@ function rollCardRewards(scale) {
   return out;
 }
 
+// Two-tap confirmation (native confirm() dialogs are blocked in some embeds).
+function armConfirm(btn, prompt) {
+  if (btn.dataset.armed) {
+    clearTimeout(Number(btn.dataset.armed));
+    delete btn.dataset.armed;
+    btn.textContent = btn.dataset.label;
+    return true;
+  }
+  btn.dataset.label = btn.textContent;
+  btn.textContent = prompt;
+  btn.dataset.armed = String(setTimeout(() => {
+    delete btn.dataset.armed;
+    btn.textContent = btn.dataset.label;
+  }, 3000));
+  return false;
+}
+
 // ---------- Wiring ----------
 function bind() {
   $('#btnLadder').onclick = findLadderMatch;
@@ -582,7 +599,7 @@ function bind() {
     toast('Sandbox resources granted.');
   };
   $('#btnReset').onclick = () => {
-    if (!confirm('Reset all progress?')) return;
+    if (!armConfirm($('#btnReset'), 'Tap again to reset')) return;
     profile = newProfile();
     saveProfile();
     renderCollection();
@@ -646,7 +663,7 @@ function bind() {
     if (b && battle.match) { battle.match.emote(battle.view.playerIdx, b.dataset.emote); $('#emotes').classList.remove('open'); }
   };
   $('#btnForfeit').onclick = () => {
-    if (battle.match && confirm('Forfeit this match?')) battle.match.forfeit(0);
+    if (battle.match && armConfirm($('#btnForfeit'), 'Sure?')) battle.match.forfeit(0);
   };
   window.addEventListener('keydown', (e) => {
     if (!battle.match) return;
