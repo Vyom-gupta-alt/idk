@@ -3937,7 +3937,7 @@
   const ui = {
     startLeague: null, startClub: null, managerName: '',
     squadSel: null, squadSort: 'pos',
-    market: { q: '', league: 'ALL', pos: 'ALL', min: 70, max: 99, price: 0, age: 0, sort: 'ovr', page: 1 },
+    market: { q: '', league: 'ALL', pos: 'ALL', min: 70, max: 99, pot: 0, price: 0, age: 0, sort: 'ovr', page: 1 },
     fixFilter: 'mine', fixDay: null, compSel: null, statsTab: 'scorers', statsComp: null,
     playback: null, previewKey: null, neg: null, sellOffers: null,
   };
@@ -4937,6 +4937,129 @@
    * Transfers
    * ------------------------------------------------------------------ */
   const interestTag = (it) => `<span class="tag int-${it.lvl}">${it.label}</span>`;
+  /* --- Shopping list: search by position, potential, OVR and age, then sign several players at once --- */
+  const SHOP_POS = [['ANY', 'Any position'], ['DEF', 'Any defender'], ['MID', 'Any midfielder'], ['ATT', 'Any attacker'], ...POSITIONS.map((p) => [p, p])];
+  const shopPosOk = (p, pos) => pos === 'ANY' || (['DEF', 'MID', 'ATT'].includes(pos) ? LINE[p.pos] === pos : p.pos === pos || (p.alt || []).includes(pos));
+  // The cheapest way to buy him: the club's asking price, or his release clause if that is lower.
+  function shopFee(p) {
+    const val = clubValuation(p, C().clubId);
+    return p.clubId !== 'FA' && p.relc && p.relc < val ? { fee: p.relc, clause: true } : { fee: val, clause: false };
+  }
+  function shopResults(s) {
+    const c = C();
+    return Object.values(S.players).filter((p) => p.clubId !== c.clubId && !p.loan && (p.clubId === 'FA' || isClub(S.clubs[p.clubId]))
+      && shopPosOk(p, s.pos) && p.pot >= s.pot && p.ovr >= s.ovr && (!s.amin || p.age >= s.amin) && (!s.amax || p.age <= s.amax))
+      .map((p) => { const it = interest(p, c.clubId); return { p, it, ...shopFee(p), wage: it.lvl ? wageDemand(p, it) : 0 }; })
+      .filter((x) => !s.keen || x.it.lvl > 0)
+      .sort((a, b) => b.p.pot - a.p.pot || b.p.ovr - a.p.ovr || a.fee - b.fee);
+  }
+  // Picks the best `n` players whose fees fit the total budget (and your wage room).
+  function shopAutoPick(s, rows) {
+    const c = C();
+    let left = Math.min(s.budget, S.clubs[c.clubId].budget), wages = c.wageBudget - wageBill(), slots = MAX_SQUAD - S.clubs[c.clubId].pids.length;
+    const sel = [], want = Math.min(s.n, slots);
+    const ok = rows.filter((x) => x.it.lvl);
+    // Best potential first, but only take a player if the cheapest of the rest can still fill the other places.
+    ok.forEach((x, i) => {
+      if (sel.length >= want || x.fee > left || x.wage > wages) return;
+      const need = want - sel.length - 1;
+      const rest = ok.slice(i + 1).filter((y) => !sel.includes(y.p.id)).sort((a, b) => a.fee - b.fee).slice(0, need);
+      const reserve = rest.length === need ? rest.reduce((a, y) => a + y.fee, 0) : 0;
+      if (x.fee + reserve > left) return;
+      sel.push(x.p.id); left -= x.fee; wages -= x.wage;
+    });
+    return sel;
+  }
+  function shopHtml() {
+    const c = C(), me = S.clubs[c.clubId], win = windowInfo();
+    const s = ui.shop || (ui.shop = { pos: 'CM', n: 3, budget: Math.max(1e6, Math.round(me.budget / 1e6) * 1e6), pot: 80, ovr: 0, amin: 0, amax: 0, keen: true, sel: [], run: false });
+    const opt = (k, v, l) => `<option value="${v}" ${s[k] === v ? 'selected' : ''}>${l}</option>`;
+    const form = `<div class="filters">
+        <label class="inline">Position <select class="input sm" id="shop-pos">${SHOP_POS.map(([v, l]) => opt('pos', v, l)).join('')}</select></label>
+        <label class="inline">How many <input class="input xs" id="shop-n" type="number" min="1" max="15" value="${s.n}"></label>
+        <label class="inline">Total budget (€M) <input class="input xs" id="shop-budget" type="number" min="0" step="1" value="${Math.round(s.budget / 1e6)}"></label>
+        <label class="inline">POT ≥ <input class="input xs" id="shop-pot" type="number" min="0" max="99" value="${s.pot || ''}" placeholder="any"></label>
+        <label class="inline">OVR ≥ <input class="input xs" id="shop-ovr" type="number" min="0" max="99" value="${s.ovr || ''}" placeholder="any"></label>
+        <label class="inline">Age <input class="input xs" id="shop-amin" type="number" min="15" max="45" value="${s.amin || ''}" placeholder="min"> – <input class="input xs" id="shop-amax" type="number" min="15" max="45" value="${s.amax || ''}" placeholder="max"></label>
+        <label class="check"><input type="checkbox" id="shop-keen" ${s.keen ? 'checked' : ''}> Only players who would join</label>
+        <button class="btn primary" data-act="shop-search">🔎 Search</button>
+      </div>`;
+    let body = '<p class="muted small">Example: 3 × CM, budget 300, POT ≥ 88, OVR ≥ 86, age up to 30. You get every player who matches, and the best ones that fit your budget are ticked for you.</p>';
+    if (s.run) {
+      const rows = shopResults(s);
+      s.sel = s.sel.filter((id) => rows.some((x) => x.p.id === id));
+      const picked = rows.filter((x) => s.sel.includes(x.p.id));
+      const fees = picked.reduce((a, x) => a + x.fee, 0), wages = picked.reduce((a, x) => a + x.wage, 0);
+      const room = c.wageBudget - wageBill();
+      const shown = rows.slice(0, 150);
+      body = `
+        <div class="notice ${picked.length ? 'info' : ''}"><strong>${rows.length}</strong> player${rows.length === 1 ? '' : 's'} match. Selected <strong>${picked.length}</strong> of ${s.n}:
+          fees <strong class="money ${fees > s.budget || fees > me.budget ? 'warn-t' : ''}">${money(fees)}</strong> of ${money(s.budget)} (your budget ${money(me.budget)}) ·
+          wages <strong class="money ${wages > room ? 'warn-t' : ''}">${money(wages)}</strong>/wk of ${money(room)} room.
+          ${picked.length < s.n && rows.length ? ` Not enough players fit the budget or wage room to fill all ${s.n} places.` : ''}
+          ${s.budget > me.budget ? ` <strong>Your transfer budget is only ${money(me.budget)}</strong>, so that is the most you can spend.` : ''}</div>
+        ${win.open ? '' : '<div class="notice">The transfer window is closed: only free agents can be signed right now.</div>'}
+        <div class="row gap wrap"><button class="btn primary" data-act="shop-sign" ${picked.length ? '' : 'disabled'}>✍️ Sign ${picked.length} selected player${picked.length === 1 ? '' : 's'}</button>
+          <button class="btn" data-act="shop-auto">⚡ Pick the best ${s.n} for my budget</button><button class="btn ghost" data-act="shop-none">Untick all</button></div>
+        <div class="tbl-wrap"><table class="tbl market"><thead><tr><th></th><th>Pos</th><th class="left">Name</th><th>Age</th><th>OVR</th><th>POT</th><th class="left">Club</th><th>Fee</th><th>Wage</th><th>Interest</th></tr></thead><tbody>
+          ${shown.map((x) => { const p = x.p; return `<tr class="${s.sel.includes(p.id) ? 'starter' : ''}"><td><input type="checkbox" data-act="shop-toggle" data-id="${p.id}" ${s.sel.includes(p.id) ? 'checked' : ''} ${x.it.lvl ? '' : 'disabled'} aria-label="Select ${esc(p.name)}"></td>
+            <td>${posTags(p)}</td><td class="left">${playerLink(p)} ${statusIcons(p)}</td><td>${p.age}</td><td>${ovrBadge(p.ovr)}</td><td>${potBadge(p)}</td>
+            <td class="left small">${esc(S.clubs[p.clubId].name)}</td><td class="money"><strong>${money(x.fee)}</strong>${x.clause ? '<br><span class="muted small">release clause</span>' : ''}</td>
+            <td class="money muted">${x.wage ? money(x.wage) : '—'}</td><td>${interestTag(x.it)}</td></tr>`; }).join('') || '<tr><td colspan="10" class="muted">Nobody matches. Try a lower POT or OVR, or a wider age range.</td></tr>'}
+        </tbody></table></div>
+        ${rows.length > shown.length ? `<p class="muted small">Showing the top ${shown.length} by potential.</p>` : ''}`;
+    }
+    return `<section class="card"><h3>🛒 Shopping list <span class="muted small">find players by potential and sign several at once</span></h3>
+      ${form}${ui.shopMsg ? `<div class="notice good">${ui.shopMsg}</div>` : ''}${body}
+      <p class="muted small">Bulk signing pays the selling club's asking price (or the release clause when that is cheaper) and gives each player the wage he asks for on a 4-year deal. For a cheaper deal, negotiate one at a time below.</p></section>`;
+  }
+  function readShop() {
+    const s = ui.shop, num = (id) => parseFloat($(id)?.value) || 0;
+    s.pos = $('#shop-pos').value; s.n = clamp(Math.round(num('#shop-n')) || 1, 1, 15);
+    s.budget = Math.max(0, Math.round(num('#shop-budget') * 1e6));
+    s.pot = clamp(Math.round(num('#shop-pot')), 0, 99); s.ovr = clamp(Math.round(num('#shop-ovr')), 0, 99);
+    s.amin = Math.round(num('#shop-amin')); s.amax = Math.round(num('#shop-amax'));
+    if (s.amin && s.amax && s.amin > s.amax) [s.amin, s.amax] = [s.amax, s.amin];
+    s.keen = $('#shop-keen').checked;
+  }
+  // Signs one player at his asking price and wage demand. Returns true or the reason it failed.
+  function quickSign(pid) {
+    const c = C(), p = S.players[pid], me = S.clubs[c.clubId];
+    if (!p || p.clubId === c.clubId) return 'already signed';
+    const err = signingBlocker(p);
+    if (err) return p.clubId !== 'FA' && !windowInfo().open ? 'window closed' : me.pids.length >= MAX_SQUAD ? 'squad full' : 'does not want to join';
+    const { fee, clause } = shopFee(p), wage = wageDemand(p, interest(p, c.clubId));
+    if (me.budget < fee) return 'not enough transfer budget';
+    if (wageBill() + wage > c.wageBudget) return 'wage does not fit your wage budget';
+    const from = S.clubs[p.clubId], fromName = p.clubId === 'FA' ? 'Free agency' : from.name;
+    me.budget -= fee;
+    if (p.clubId !== 'FA') creditSale(p, from.id, c.clubId, fee);
+    movePlayer(p, c.clubId);
+    p.wage = wage; p.contract = c.season + 4; p.inj = 0; p.sus = 0; p.relc = 0; p.sellOn = null;
+    delete c.talks[pid];
+    c.transfers.unshift({ season: c.season, date: curDate(), pid, name: p.name, dir: 'in', club: fromName, fee });
+    news(`✍️ Signed ${p.name} (${p.pos}, ${p.ovr}, POT ${p.pot}) from ${fromName}${clause ? ` by paying his ${money(fee)} release clause` : ` for ${money(fee)}`} on ${money(wage)} a week until ${contractLabel(p)}.`, 'good');
+    return true;
+  }
+  function shopSign() {
+    const s = ui.shop, done = [], fails = [];
+    let spent = 0;
+    for (const id of s.sel.slice()) {
+      const p = S.players[id];
+      if (!p) continue;
+      const { fee } = shopFee(p);
+      if (spent + fee > s.budget) { fails.push([p.name, 'over your total budget for this search']); continue; }
+      const r = quickSign(id);
+      if (r === true) { done.push(p.name); spent += fee; } else fails.push([p.name, r]);
+    }
+    s.sel = [];
+    cleanLineup(); invalidate(); save();
+    ui.shopMsg = `${done.length ? `✅ Signed ${done.length} player${done.length > 1 ? 's' : ''} for ${money(spent)}: ${esc(done.join(', '))}. ` : ''}${fails.length ? `Not signed: ${groupFails(fails)}` : ''}`;
+    if (done.length) toast(`${done.length} player${done.length > 1 ? 's' : ''} signed for ${money(spent)}.`, 'good');
+    else toast('Nobody was signed.', 'bad');
+    render();
+  }
+
   function viewTransfers() {
     const c = C(), me = S.clubs[c.clubId], f = ui.market, win = windowInfo();
     const q = norm(f.q);
@@ -4946,6 +5069,7 @@
     if (f.pos !== 'ALL') list = list.filter((p) => (['DEF', 'MID', 'ATT'].includes(f.pos) ? LINE[p.pos] === f.pos : p.pos === f.pos));
     list = list.filter((p) => p.ovr >= f.min && p.ovr <= f.max);
     if (f.age) list = list.filter((p) => p.age <= f.age);
+    if (f.pot) list = list.filter((p) => p.pot >= f.pot);
     if (q) list = list.filter((p) => norm(p.name).includes(q) || norm(S.clubs[p.clubId].name).includes(q));
     let rows = list.map((p) => ({ p, fee: clubValuation(p, c.clubId) }));
     const maxPrice = f.price === -1 ? me.budget : f.price;
@@ -4956,6 +5080,7 @@
     rows = rows.slice(0, 40 * f.page);
     const bill = wageBill();
     return `
+      ${shopHtml()}
       <section class="card">
         <div class="row between wrap gap">
           <h3>Transfer market <button class="btn xs" data-act="adv-open" data-id="">💡 Sell players to free up wages</button></h3>
@@ -4967,6 +5092,7 @@
           <select class="input" id="m-league" data-change="m-league"><option value="ALL">All leagues</option>${S.leagueOrder.map((id) => `<option value="${id}" ${f.league === id ? 'selected' : ''}>${esc(S.leagues[id].name)}</option>`).join('')}<option value="FA" ${f.league === 'FA' ? 'selected' : ''}>Free agents & youth</option></select>
           <select class="input" id="m-pos" data-change="m-pos"><option value="ALL">All positions</option>${[['GK', 'Goalkeepers'], ['DEF', 'All defenders'], ['MID', 'All midfielders'], ['ATT', 'All attackers']].map(([v, l]) => `<option value="${v}" ${f.pos === v ? 'selected' : ''}>${l}</option>`).join('')}${POSITIONS.filter((p) => p !== 'GK').map((p) => `<option ${f.pos === p ? 'selected' : ''}>${p}</option>`).join('')}</select>
           <label class="inline">OVR <input class="input xs" id="m-min" type="number" min="40" max="99" value="${f.min}" data-change="m-min"> – <input class="input xs" id="m-max" type="number" min="40" max="99" value="${f.max}" data-change="m-max"></label>
+          <label class="inline">POT ≥ <input class="input xs" id="m-pot" type="number" min="0" max="99" value="${f.pot || ''}" placeholder="any" data-change="m-pot"></label>
           <select class="input" id="m-age" data-change="m-age"><option value="0">Any age</option>${[19, 21, 23, 25, 28, 30].map((a) => `<option value="${a}" ${f.age === a ? 'selected' : ''}>≤ ${a}</option>`).join('')}</select>
           <select class="input" id="m-price" data-change="m-price"><option value="0">Any fee</option>${[1e6, 5e6, 10e6, 20e6, 40e6, 70e6, 100e6, 150e6].map((v) => `<option value="${v}" ${f.price === v ? 'selected' : ''}>≤ ${money(v)}</option>`).join('')}<option value="-1" ${f.price === -1 ? 'selected' : ''}>Affordable</option></select>
           <select class="input" id="m-sort" data-change="m-sort">${[['ovr', 'Best OVR'], ['pot', 'Best potential'], ['price', 'Cheapest'], ['priceDesc', 'Most expensive'], ['age', 'Youngest']].map(([k, l]) => `<option value="${k}" ${f.sort === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
@@ -5882,6 +6008,11 @@
       toast(`${offers.length} club${offers.length > 1 ? 's' : ''} made an offer.`, 'good');
     },
     'm-more': () => { ui.market.page++; render(); },
+    'shop-search': () => { readShop(); const s = ui.shop; s.run = true; ui.shopMsg = null; s.sel = shopAutoPick(s, shopResults(s)); render(); },
+    'shop-auto': () => { readShop(); const s = ui.shop; s.sel = shopAutoPick(s, shopResults(s)); render(); },
+    'shop-none': () => { ui.shop.sel = []; render(); },
+    'shop-toggle': (id) => { const s = ui.shop; s.sel = s.sel.includes(id) ? s.sel.filter((x) => x !== id) : s.sel.concat(id); render(); },
+    'shop-sign': () => { const n = ui.shop.sel.length; askConfirm(`Sign ${n} player${n > 1 ? 's' : ''} at their asking price and wage demand?`, () => shopSign(), 'Sign them'); },
     'day-go': (id) => { if (id === '') return; ui.fixDay = +id; render(); },
     'cal-go': (id) => { ui.fixFilter = 'mine'; ui.fixDay = +id; render(); },
     'sim-to': (id) => { const n = simUntilDay(+id); toast(`Simulated ${n} match day${n === 1 ? '' : 's'}.`, 'good'); render(); },
@@ -5947,6 +6078,7 @@
     'm-age': (v) => { ui.market.age = +v; ui.market.page = 1; render(); },
     'm-price': (v) => { ui.market.price = +v; ui.market.page = 1; render(); },
     'm-sort': (v) => { ui.market.sort = v; render(); },
+    'm-pot': (v) => { ui.market.pot = clamp(+v || 0, 0, 99); ui.market.page = 1; render(); },
   };
 
   document.addEventListener('click', (e) => {
