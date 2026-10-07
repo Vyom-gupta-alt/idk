@@ -64,7 +64,16 @@ When you negotiate for a player, you can offer one of your own players as part o
 - **Sell-on clauses:** offer the selling club 10–30% of any future fee and they'll accept less now. This is worth most for young players. When the player is sold on later, that club automatically receives its cut. The same applies to players you buy who already carry a sell-on clause.
 
 ## Features
-- **14 leagues in 7 countries:** Premier League, LaLiga, Serie A, Bundesliga, Ligue 1, Liga Portugal and Eredivisie, with real 2025/26 squads, plus their second divisions: Championship (24 clubs, with midweek rounds), LaLiga Hypermotion, Serie B, 2. Bundesliga, Ligue 2, Liga Portugal 2 and Eerste Divisie. Second-division clubs are real, but their squads are generated.
+- **26 leagues on four continents.** **Europe (14 leagues, 7 countries):** Premier League, LaLiga, Serie A, Bundesliga, Ligue 1, Liga Portugal and Eredivisie, with real 2025/26 squads, plus their second divisions: Championship (24 clubs, with midweek rounds), LaLiga Hypermotion, Serie B, 2. Bundesliga, Ligue 2, Liga Portugal 2 and Eerste Divisie. Second-division clubs are real, but their squads are generated.
+- **12 more leagues:** Süper Lig (Türkiye), Pro League (Belgium), Scottish Premiership, Saudi Pro League, Major League Soccer (30 clubs), Liga MX, Brasileirão Série A, Liga Profesional (Argentina, 30 clubs), J1 League, K League 1, A-League Men and the Indian Super League.
+  - Every club is real, and the best-known players are real (Ronaldo, Benzema, Mahrez and Neymar, Messi, Son and Müller, Osimhen, Sané and Gündoğan, Sergio Ramos, James Rodríguez, Di María, Chhetri and many more). The rest of each squad is generated around the club's level.
+  - Each country has its own cup: Türkiye Kupası, Belgian Cup, Scottish Cup, King's Cup, U.S. Open Cup, Copa MX, Copa do Brasil, Copa Argentina, Emperor's Cup, Korea Cup, Australia Cup and Super Cup.
+  - Türkiye, Belgium and Scotland send clubs to the Champions League, Europa League and Conference League. The competitions stay at 36, 24 and 16 clubs, so the big five now have a place or two fewer than before. Season 1 uses the real 2024/25 tables and cup winners.
+  - The other leagues have no continental competition. All leagues follow the same August-to-May calendar, including those that really play over a calendar year.
+  - Saudi clubs start with bigger budgets, but players treat a move there like a step down in prestige.
+  - The new leagues have no second divisions, so nobody is relegated from them.
+  - Generated players get names and nationalities from their country, including India, which is now a national team.
+  - The ratings import recognises the new league names.
 - **Promotion & relegation:** the bottom 3 of each top division swap places with the top 3 of the division below every season. Reserve sides (B / Jong) can't be promoted.
 - **Player career history** for every real player and your own squad, shown in each player's profile.
 - **Substitutions** during matches (up to 5 per side).

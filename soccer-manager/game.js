@@ -177,7 +177,8 @@
     const opts = r >= 80 ? ['tiki', 'gegen', 'balanced', 'wing'] : r >= 72 ? ['balanced', 'counter', 'wing', 'gegen'] : ['counter', 'longball', 'balanced', 'bus'];
     return (club.style = opts[Math.floor(h * opts.length)]);
   }
-  const LEAGUE_MONEY = { ENG: 1.6, ESP: 1.15, ITA: 1.1, GER: 1.15, FRA: 0.9, POR: 0.5, NED: 0.5, ENG2: 0.45, ESP2: 0.25, ITA2: 0.25, GER2: 0.3, FRA2: 0.2, POR2: 0.1, NED2: 0.1 };
+  const LEAGUE_MONEY = { ENG: 1.6, ESP: 1.15, ITA: 1.1, GER: 1.15, FRA: 0.9, POR: 0.5, NED: 0.5, ENG2: 0.45, ESP2: 0.25, ITA2: 0.25, GER2: 0.3, FRA2: 0.2, POR2: 0.1, NED2: 0.1,
+    TUR: 0.45, BEL: 0.35, SCO: 0.3, KSA: 2.5, USA: 0.6, MEX: 0.35, BRA: 0.4, ARG: 0.15, JPN: 0.25, KOR: 0.15, AUS: 0.1, IND: 0.08 };
   const PROMOTED = 3; // clubs promoted and relegated between each pair of divisions
 
   /* ------------------------------------------------------------------ *
@@ -211,9 +212,10 @@
     if (p.ovr0 == null) p.ovr0 = p.ovr;
   }
 
-  function addPlayer(W, { name, pos, ovr, age, clubId, gen }) {
+  function addPlayer(W, { name, pos, ovr, age, clubId, gen, nat }) {
     const id = 'p' + (W.nextId++);
     const p = { id, name, pos, ovr: clamp(Math.round(ovr), 30, 99), age: clamp(Math.round(age) || 25, 15, 45), clubId, gen: !!gen, form: 0, inj: 0, sus: 0, st: newStats() };
+    if (nat) p.nat = nat;
     ensureFields(p);
     W.players[id] = p;
     if (clubId && W.clubs[clubId]) W.clubs[clubId].pids.push(id);
@@ -222,8 +224,8 @@
 
   function parsePlayerString(str) {
     return String(str || '').split('|').map((s) => s.trim()).filter(Boolean).map((row) => {
-      const [name, pos, ovr, age] = row.split(',').map((x) => x.trim());
-      return { name, pos: POSITIONS.includes(pos) ? pos : 'CM', ovr: +ovr, age: +age };
+      const [name, pos, ovr, age, nat] = row.split(',').map((x) => x.trim());
+      return { name, pos: POSITIONS.includes(pos) ? pos : 'CM', ovr: +ovr, age: +age, nat: nat || undefined };
     });
   }
 
@@ -294,11 +296,12 @@
     rng = mulberry32(20252026);
     const W = { v: 1, nextId: 1, leagues: {}, leagueOrder: [], clubs: {}, players: {} };
     for (const L of D.leagues) {
-      W.leagues[L.id] = { id: L.id, name: L.name, country: L.country, pool: L.pool, tier: L.tier || 1, parent: L.parent || null, clubIds: [] };
+      W.leagues[L.id] = { id: L.id, name: L.name, country: L.country, pool: L.pool, tier: L.tier || 1, parent: L.parent || null, region: L.region || 'Europe', clubIds: [] };
       W.leagueOrder.push(L.id);
       L.clubs.forEach((c, i) => {
         const id = `${L.id}-${i}`;
         const club = { id, name: c[0], short: c[1], leagueId: L.id, pids: [], level: c[3] || 0, budget: 0, formation: null };
+        if (L.starsOnly && c[3]) club.fixedLevel = 1;
         W.clubs[id] = club;
         W.leagues[L.id].clubIds.push(id);
         parsePlayerString(c[2]).forEach((pp) => addPlayer(W, { ...pp, clubId: id }));
@@ -348,7 +351,7 @@
     assignClauses(W);
     for (const club of Object.values(W.clubs)) {
       if (!isClub(club)) continue;
-      club.level = club.pids.length >= 6 ? computeLevel(W, club) : (club.level || 66);
+      if (!club.fixedLevel) club.level = club.pids.length >= 6 ? computeLevel(W, club) : (club.level || 66);
       fillSquad(W, club);
       if (!club.budget) club.budget = initialBudget(W, club);
     }
@@ -359,7 +362,7 @@
   /* --- Nations: nationality of every player, national-team reserve pools, world ranking (Elo) --- */
   const NATIONS = Object.fromEntries((D.nations || []).map(([code, name, confed, base, pool]) => [code, { code, name, confed, base, pool }]));
   const natClubId = (code) => 'N-' + code;
-  const POOL_NAT = { en: 'ENG', es: 'ESP', it: 'ITA', de: 'GER', fr: 'FRA', pt: 'POR', nl: 'NED' };
+  const POOL_NAT = { en: 'ENG', es: 'ESP', it: 'ITA', de: 'GER', fr: 'FRA', pt: 'POR', nl: 'NED', tr: 'TUR', be: 'BEL', sc: 'SCO', sa: 'KSA', us: 'USA', mx: 'MEX', br: 'BRA', ag: 'ARG', jp: 'JPN', kr: 'KOR', au: 'AUS', in: 'IND' };
   let NAT_INDEX = null;
   function natIndex() {
     if (NAT_INDEX) return NAT_INDEX;
@@ -924,9 +927,12 @@
   let W = null;       // base world for new careers
   const C = () => S.career;
 
-  const CUP_NAMES = { ENG: 'FA Cup', ESP: 'Copa del Rey', ITA: 'Coppa Italia', GER: 'DFB-Pokal', FRA: 'Coupe de France', POR: 'Taça de Portugal', NED: 'KNVB Cup' };
-  const LEAGUE_SHORT = { ENG: 'PL', ESP: 'LaLiga', ITA: 'Serie A', GER: 'BL', FRA: 'Ligue 1', POR: 'LPT', NED: 'ERE', ENG2: 'Champ', ESP2: 'LaLiga 2', ITA2: 'Serie B', GER2: '2. BL', FRA2: 'Ligue 2', POR2: 'LPT 2', NED2: 'KKD' };
-  const LEAGUE_PRESTIGE = { ENG: 3, ESP: 2, ITA: 1.5, GER: 1.5, FRA: 0.5, POR: -1.5, NED: -2, ENG2: -2, ESP2: -4, ITA2: -4, GER2: -3.5, FRA2: -5, POR2: -7, NED2: -8 };
+  const CUP_NAMES = { ENG: 'FA Cup', ESP: 'Copa del Rey', ITA: 'Coppa Italia', GER: 'DFB-Pokal', FRA: 'Coupe de France', POR: 'Taça de Portugal', NED: 'KNVB Cup',
+    TUR: 'Türkiye Kupası', BEL: 'Belgian Cup', SCO: 'Scottish Cup', KSA: "King's Cup", USA: 'U.S. Open Cup', MEX: 'Copa MX', BRA: 'Copa do Brasil', ARG: 'Copa Argentina', JPN: "Emperor's Cup", KOR: 'Korea Cup', AUS: 'Australia Cup', IND: 'Super Cup' };
+  const LEAGUE_SHORT = { ENG: 'PL', ESP: 'LaLiga', ITA: 'Serie A', GER: 'BL', FRA: 'Ligue 1', POR: 'LPT', NED: 'ERE', ENG2: 'Champ', ESP2: 'LaLiga 2', ITA2: 'Serie B', GER2: '2. BL', FRA2: 'Ligue 2', POR2: 'LPT 2', NED2: 'KKD',
+    TUR: 'Süper Lig', BEL: 'JPL', SCO: 'SPFL', KSA: 'SPL', USA: 'MLS', MEX: 'Liga MX', BRA: 'Série A', ARG: 'LPF', JPN: 'J1', KOR: 'K1', AUS: 'A-League', IND: 'ISL' };
+  const LEAGUE_PRESTIGE = { ENG: 3, ESP: 2, ITA: 1.5, GER: 1.5, FRA: 0.5, POR: -1.5, NED: -2, ENG2: -2, ESP2: -4, ITA2: -4, GER2: -3.5, FRA2: -5, POR2: -7, NED2: -8,
+    TUR: -3, BEL: -3.5, SCO: -4.5, KSA: -3, USA: -4, MEX: -4.5, BRA: -2.5, ARG: -4, JPN: -6, KOR: -7, AUS: -8, IND: -11 };
   // Leagues below a top division (children), and helpers to walk the pyramid.
   const childLeagues = (lid) => Object.values(S.leagues).filter((l) => l.parent === lid).map((l) => l.id);
   const cupIdOf = (lid) => 'C-' + (S.leagues[lid]?.parent || lid);
@@ -939,9 +945,9 @@
   const EURO_ORDER = ['UCL', 'UEL', 'UECL'];
   // European places per league (league position order; the domestic cup winner takes the first Europa League place).
   const QUOTA = {
-    UCL: { ENG: 6, ESP: 6, ITA: 6, GER: 6, FRA: 5, POR: 4, NED: 3 },
-    UEL: { ENG: 4, ESP: 4, ITA: 4, GER: 4, FRA: 3, POR: 3, NED: 2 },
-    UECL: { ENG: 2, ESP: 2, ITA: 2, GER: 2, FRA: 2, POR: 3, NED: 3 },
+    UCL: { ENG: 6, ESP: 5, ITA: 5, GER: 5, FRA: 4, POR: 3, NED: 2, TUR: 2, BEL: 2, SCO: 2 },
+    UEL: { ENG: 3, ESP: 3, ITA: 3, GER: 3, FRA: 3, POR: 2, NED: 2, TUR: 2, BEL: 2, SCO: 1 },
+    UECL: { ENG: 1, ESP: 2, ITA: 2, GER: 2, FRA: 2, POR: 2, NED: 2, TUR: 1, BEL: 1, SCO: 1 },
   };
   // Real 2024/25 finishing order (top of each table) and cup winners, used for the first season's European places.
   const FINAL_2425 = {
@@ -952,8 +958,11 @@
     FRA: ['Paris Saint-Germain', 'Olympique de Marseille', 'AS Monaco', 'OGC Nice', 'LOSC Lille', 'Olympique Lyonnais', 'RC Strasbourg', 'RC Lens', 'Stade Brestois 29', 'Toulouse FC'],
     POR: ['Sporting CP', 'SL Benfica', 'FC Porto', 'SC Braga', 'Santa Clara', 'Vitória SC', 'FC Famalicão', 'GD Estoril Praia', 'Casa Pia AC', 'Moreirense'],
     NED: ['PSV', 'Ajax', 'Feyenoord', 'FC Utrecht', 'AZ Alkmaar', 'FC Twente', 'Go Ahead Eagles', 'NEC Nijmegen'],
+    TUR: ['Galatasaray', 'Fenerbahçe', 'Samsunspor', 'Beşiktaş', 'İstanbul Başakşehir', 'Eyüpspor'],
+    BEL: ['Union Saint-Gilloise', 'Club Brugge', 'RSC Anderlecht', 'KRC Genk', 'Royal Antwerp', 'KAA Gent'],
+    SCO: ['Celtic', 'Rangers', 'Hibernian', 'Dundee United', 'Aberdeen', 'Heart of Midlothian'],
   };
-  const CUP_WINNERS_2425 = { ENG: 'Crystal Palace', ESP: 'FC Barcelona', ITA: 'Bologna', GER: 'VfB Stuttgart', FRA: 'Paris Saint-Germain', POR: 'Sporting CP', NED: 'Go Ahead Eagles' };
+  const CUP_WINNERS_2425 = { ENG: 'Crystal Palace', ESP: 'FC Barcelona', ITA: 'Bologna', GER: 'VfB Stuttgart', FRA: 'Paris Saint-Germain', POR: 'Sporting CP', NED: 'Go Ahead Eagles', TUR: 'Galatasaray', BEL: 'Club Brugge', SCO: 'Aberdeen' };
   const STAGE_NAME = { PO: 'Knockout play-offs', R16: 'Round of 16', QF: 'Quarter-finals', SF: 'Semi-finals', F: 'Final' };
 
   const isoAdd = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
@@ -1931,7 +1940,7 @@
     const goals = [];
     let target, text;
     if (tier === 2) { target = E <= 4 ? 3 : E <= 9 ? Math.ceil(n / 2) : n - 3; text = target === 3 ? 'Win promotion (top 3)' : target === n - 3 ? 'Avoid relegation' : 'Finish in the top half'; }
-    else { target = E === 1 ? 1 : E <= 4 ? 4 : E <= 8 ? E + 1 : E <= n - 5 ? Math.min(n - 4, E + 2) : n - 3; text = target === 1 ? `Win the ${L.name}` : target === 4 ? 'Finish in the top 4' : target === n - 3 ? 'Avoid relegation' : `Finish ${ordinal(target)} or higher`; }
+    else { target = E === 1 ? 1 : E <= 4 ? 4 : E <= 8 ? E + 1 : E <= n - 5 ? Math.min(n - 4, E + 2) : n - 3; text = target === 1 ? `Win the ${L.name}` : target === 4 ? 'Finish in the top 4' : target === n - 3 ? (childLeagues(c.leagueId).length ? 'Avoid relegation' : 'Stay out of the bottom three') : `Finish ${ordinal(target)} or higher`; }
     goals.push({ type: 'league', target, text });
     const cup = c.comps[cupIdOf(c.leagueId)];
     if (cup && tier === 1 && E <= 4) goals.push({ type: 'cup', comp: cup.id, text: `Reach the ${cup.name} semi-finals` });
@@ -1943,7 +1952,7 @@
       b.long = tier === 2 ? { type: 'promotion', by: c.season + 1, text: `Win promotion by ${seasonLabel(c.season + 1)}` }
         : E === 1 && euroOf(c.clubId)?.id === 'UCL' ? { type: 'uclwin', by, text: `Win the Champions League by ${seasonLabel(by)}` }
         : E <= 4 ? { type: 'title', by, text: `Win the ${L.name} by ${seasonLabel(by)}` }
-        : E <= 9 ? { type: 'ucl', by, text: `Qualify for the Champions League by ${seasonLabel(by)}` }
+        : E <= 9 && QUOTA.UCL[c.leagueId] ? { type: 'ucl', by, text: `Qualify for the Champions League by ${seasonLabel(by)}` }
         : { type: 'tophalf', by, text: `Establish the club in the top half by ${seasonLabel(by)}` };
     }
     news(`📋 Board objectives for ${seasonLabel(c.season)}: ${goals.map((g) => g.text).join(' · ')}. Long-term: ${b.long.text}.`, 'info');
@@ -2843,7 +2852,7 @@
     europe: { label: 'Europe', desc: 'Technically strong prospects from across Europe.', pools: ['en', 'es', 'it', 'de', 'fr', 'nl', 'pt'] },
     samerica: { label: 'South America', desc: 'Flair and high potential, but raw.', nats: ['BRA', 'ARG', 'URU', 'COL', 'ECU'], pool: ['pt', 'es'] },
     africa: { label: 'Africa', desc: 'Athletic prospects with a big potential range.', nats: ['MAR', 'SEN', 'NGA', 'CIV', 'GHA', 'CMR', 'MLI'], pool: ['fr', 'world'] },
-    asia: { label: 'Asia', desc: 'Disciplined, fast-developing players.', nats: ['JPN', 'KOR', 'UZB', 'AUS'], pool: ['world'] },
+    asia: { label: 'Asia', desc: 'Disciplined, fast-developing players.', nats: ['JPN', 'KOR', 'UZB', 'AUS', 'KSA', 'IND'], pool: ['world'] },
   };
   const ACADEMY_COST = [0, 4e6, 10e6, 20e6, 35e6];
   const academy = () => { const c = C(); return c.academy || (c.academy = { level: 1, scouted: 0, season: c.season }); };
@@ -2851,7 +2860,7 @@
     const c = C(), lvl = academy().level, R = ACADEMY_REGIONS[region] || ACADEMY_REGIONS.local;
     let pool = S.leagues[c.leagueId].pool, nat = POOL_NAT[pool] || null;
     if (R.pools) { pool = pick(R.pools); nat = POOL_NAT[pool]; }
-    if (R.nats) { nat = pick(R.nats); pool = pick(R.pool); if (nat === 'BRA') pool = 'pt'; if (['ARG', 'URU', 'COL', 'ECU'].includes(nat)) pool = 'es'; }
+    if (R.nats) { nat = pick(R.nats); pool = NATIONS[nat]?.pool && D.names[NATIONS[nat].pool] ? NATIONS[nat].pool : pick(R.pool); }
     const age = randInt(15, 17);
     const ovr = randInt(42, 53) + lvl * 2 + (age - 15) * 2;
     const spread = region === 'africa' || region === 'samerica' ? 30 : 24;
@@ -3703,7 +3712,8 @@
   function findLeague(state, name) {
     const n = norm(name);
     if (!n) return null;
-    const rules = [['ENG', /premier/], ['ESP', /la ?liga|primera division/], ['ITA', /serie a|calcio a/], ['GER', /^(1 )?bundesliga|german 1/], ['FRA', /ligue 1|french ligue/], ['POR', /liga portugal|primeira|portugal/], ['NED', /eredivisie|dutch/]];
+    const rules = [['SCO', /scottish|scotland/], ['KSA', /saudi|roshn/], ['USA', /major league soccer|^mls/], ['MEX', /liga mx|mexic/], ['BRA', /brasil|brazil/], ['ARG', /argentin|liga profesional/], ['JPN', /j1|j league|japan/], ['KOR', /k league|korea/], ['AUS', /a-league|a league|australia/], ['IND', /indian super|^isl\b|india/], ['TUR', /super lig|turk/], ['BEL', /belgi|jupiler|pro league/],
+      ['ENG', /premier/], ['ESP', /la ?liga|primera division/], ['ITA', /serie a|calcio a/], ['GER', /^(1 )?bundesliga|german 1/], ['FRA', /ligue 1|french ligue/], ['POR', /liga portugal|primeira|portugal/], ['NED', /eredivisie|dutch/]];
     for (const [id, re] of rules) if (re.test(n) && state.leagues[id]) return state.leagues[id];
     return Object.values(state.leagues).find((l) => norm(l.name) === n) || null;
   }
@@ -4040,7 +4050,7 @@
             <p class="muted small">Your club gets a generated squad built around the strength you pick. The club it replaces leaves the league, and its players become free agents you can try to sign.</p>
           </div>` : ''}`;
     }
-    const leagueCards = (tier) => W.leagueOrder.map((id) => W.leagues[id]).filter((l) => (l.tier || 1) === tier).map((l) => `
+    const leagueCards = (tier, region) => W.leagueOrder.map((id) => W.leagues[id]).filter((l) => (l.tier || 1) === tier && (l.region || 'Europe') === region).map((l) => `
       <button class="league-card ${ui.startLeague === l.id ? 'sel' : ''}" data-act="start-league" data-id="${l.id}">
         <span class="lc-name">${esc(l.name)}</span><span class="muted small">${esc(l.country || 'Custom')} · ${l.clubIds.length} clubs</span>
       </button>`).join('');
@@ -4049,7 +4059,7 @@
         <header class="hero">
           <div class="hero-ball">⚽</div>
           <h1>Soccer Manager <span>26</span></h1>
-          <p>Manage a club or build your own player's career across 14 European divisions, with domestic cups, European competitions, promotion and relegation.</p>
+          <p>Manage a club or build your own player's career across ${W.leagueOrder.length} leagues in Europe, the Americas and Asia, with domestic cups, European competitions, promotion and relegation.</p>
         </header>
         ${sc ? `
           <div class="card continue">
@@ -4077,15 +4087,17 @@
               <span class="muted small">Starts at 64 OVR, age 17, with high potential.</span>` : ''}
           </div>
           <h2 class="step"><span>3</span> Choose a league</h2>
-          <h4>Top divisions</h4><div class="league-grid">${leagueCards(1)}</div>
-          <h4>Second divisions</h4><div class="league-grid">${leagueCards(2)}</div>
+          <h4>Europe · top divisions</h4><div class="league-grid">${leagueCards(1, 'Europe')}</div>
+          <h4>Europe · second divisions</h4><div class="league-grid">${leagueCards(2, 'Europe')}</div>
+          <h4>Americas</h4><div class="league-grid">${leagueCards(1, 'Americas')}</div>
+          <h4>Asia & Oceania</h4><div class="league-grid">${leagueCards(1, 'Asia')}</div>
           ${clubsHtml}
           <div class="start-actions">
             <button class="btn ghost" data-act="open-import">Import FC 26 ratings…</button>
             <button class="btn primary big" data-act="start-career" ${ui.startClub ? '' : 'disabled'}>${pm ? 'Start player career' : 'Start manager career'}${ui.startClub && ui.startClub !== 'NEW' ? ` ${pm ? 'at' : 'with'} ${esc(W.clubs[ui.startClub].name)}` : ui.startClub ? ' with your new club' : ''} →</button>
           </div>
         </div>
-        <p class="muted small center">14 leagues (top flights and second divisions), 7 domestic cups, the Champions League, Europa League and Conference League, with 3 clubs promoted and relegated each season. Top-flight ratings are FC 26-style estimates. Second-division squads are generated.</p>
+        <p class="muted small center">${W.leagueOrder.length} leagues, a domestic cup in every country, and the Champions League, Europa League and Conference League for European clubs, with 3 clubs promoted and relegated between the European divisions each season. Big-seven top-flight ratings are FC 26-style estimates. Elsewhere only the best-known players are real, and the rest of each squad is generated, as are second-division squads.</p>
       </div>`;
   }
 
@@ -5186,6 +5198,7 @@
       </tbody></table></div>
       ${L.parent
         ? `<div class="legend"><span><i class="z-promo"></i> Promoted to the ${esc(S.leagues[L.parent].name)}</span><span class="muted">Reserve sides (B / Jong) cannot be promoted.</span></div>`
+        : !q3 ? `<div class="legend"><span class="muted">No European places: clubs in the ${esc(L.name)} play the league and the ${esc(CUP_NAMES[lid] || 'cup')} only.</span></div>`
         : `<div class="legend"><span><i class="z-cl"></i> Champions League</span><span><i class="z-el"></i> Europa League</span><span><i class="z-ecl"></i> Conference League</span>${hasLower ? `<span><i class="z-rel"></i> Relegated to the ${esc(S.leagues[childLeagues(lid)[0]].name)}</span>` : ''}<span class="muted">The ${esc(CUP_NAMES[lid] || 'cup')} winner also gets a Europa League place.</span></div>`}
       <p class="muted small">${n} clubs.</p>`;
   }
