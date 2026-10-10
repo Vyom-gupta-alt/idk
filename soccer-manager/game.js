@@ -4065,19 +4065,26 @@
     openModal(`<h2>✨ Create players</h2>
       <p class="muted small">Make your own players: name, position, age, OVR, potential and nationality. Add as many as you like (up to ${SPAWN_MAX} at a time), then create them all at once. They join on a 3-year contract with a normal wage for their rating.</p>
       ${spawnRowsHtml('sp')}
-      <div class="row gap wrap mt"><label class="inline">Put them <select class="input sm" id="sp-dest">${[['club', `In my squad (${club.pids.length}/${MAX_SQUAD})`], ['FA', 'In free agency (sign them later)']].map(([v, l]) => `<option value="${v}" ${dest === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <div class="row gap wrap mt"><label class="inline">Put them <select class="input sm" id="sp-dest">${[['club', `${isPlayerMode() ? 'At my club' : 'In my squad'}: ${club.name} (${club.pids.length}/${MAX_SQUAD})`], ['FA', 'In free agency']].map(([v, l]) => `<option value="${v}" ${dest === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+          ${S.leagueOrder.map((lid) => `<optgroup label="${esc(S.leagues[lid].name)}">${S.leagues[lid].clubIds.filter((id) => id !== c.clubId && S.clubs[id]).map((id) => `<option value="${id}" ${dest === id ? 'selected' : ''}>${esc(S.clubs[id].name)} (${S.clubs[id].pids.length}/${MAX_SQUAD})</option>`).join('')}</optgroup>`).join('')}</select></label>
         <button class="btn primary" data-act="spawn-create">Create players</button><button class="btn ghost" data-act="close">Close</button></div>`, true);
   }
   function spawnCreate() {
     readSpawn('sp');
-    const c = C(), club = S.clubs[c.clubId], dest = (ui.spawnDest = $('#sp-dest').value);
+    const c = C(), dest = (ui.spawnDest = $('#sp-dest').value);
+    const to = dest === 'club' ? c.clubId : dest, club = S.clubs[to];
+    if (!club) return toast('Pick where the players should go.', 'bad');
     const rows = ui.spawn.filter((r) => r.name);
     if (!rows.length) return toast('Give at least one player a name.', 'bad');
-    if (dest === 'club' && club.pids.length + rows.length > MAX_SQUAD) return toast(`Your squad can take ${Math.max(0, MAX_SQUAD - club.pids.length)} more player(s) (max ${MAX_SQUAD}). Put the rest in free agency, or release someone.`, 'bad');
-    const made = makeSpawned(S, rows, dest === 'club' ? c.clubId : 'FA', c.season);
+    if (to !== 'FA' && club.pids.length + rows.length > MAX_SQUAD) return toast(`${club.name} can take ${Math.max(0, MAX_SQUAD - club.pids.length)} more player(s) (max ${MAX_SQUAD}). Put the rest somewhere else.`, 'bad');
+    const made = makeSpawned(S, rows, to, c.season);
     ui.spawn = ui.spawn.filter((r) => !r.name);
-    invalidate(); cleanLineup(); save();
-    news(`✨ ${made.length} new player${made.length > 1 ? 's' : ''} created${dest === 'club' ? ` and added to ${club.name}` : ' as free agents'}: ${made.map((p) => `${p.name} (${p.pos}, ${p.ovr})`).join(', ')}.`, 'good');
+    invalidate();
+    // AI-run clubs (every club in a player career) rethink their formation around the new players.
+    if (to !== 'FA' && (to !== c.clubId || isPlayerMode())) { club.formation = pickFormation(club); invalidate(); }
+    if (!isPlayerMode()) cleanLineup();
+    save();
+    news(`✨ ${made.length} new player${made.length > 1 ? 's' : ''} created${to === 'FA' ? ' as free agents' : ` and added to ${club.name}`}: ${made.map((p) => `${p.name} (${p.pos}, ${p.ovr})`).join(', ')}.`, 'good');
     toast(`${made.length} player${made.length > 1 ? 's' : ''} created.`, 'good');
     closeModal(); render();
   }
@@ -4908,7 +4915,7 @@
     const t = leagueTable(c.leagueId), pos = t.findIndex((r) => r.id === c.clubId) + 1;
     return `
       <section class="card">
-        <div class="row between wrap gap"><h3>${crest(club)} ${esc(club.name)}</h3><span class="muted">${esc(S.leagues[club.leagueId].name)} · ${ordinal(pos)} · Team OVR ${clubRating(club.id)} · ${club.formation}</span></div>
+        <div class="row between wrap gap"><h3>${crest(club)} ${esc(club.name)}</h3><span class="muted">${esc(S.leagues[club.leagueId].name)} · ${ordinal(pos)} · Team OVR ${clubRating(club.id)} · ${club.formation}</span><button class="btn xs primary" data-act="spawn-open">✨ Create players</button></div>
         <p class="muted small">The manager picks the team. Players marked ● are in his current best XI.</p>
         <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pos</th><th class="left">Name</th><th>Age</th><th>OVR</th><th>POT</th><th>Form</th><th>Apps</th><th>G</th><th>A</th><th>Avg</th></tr></thead><tbody>
         ${players.map((p) => `<tr class="${p.id === c.pid ? 'me' : ''} ${!available(p) ? 'unavail' : ''}"><td>${posBadge(p.pos)}</td><td class="left">${inXi.has(p.id) ? '<span class="xi-dot"></span>' : ''}${playerLink(p)} ${statusIcons(p)} ${p.id === c.pid ? '<span class="tag good">YOU</span>' : ''}</td><td>${p.age}</td><td>${ovrBadge(p.ovr)}${delta(p)}</td><td>${potBadge(p)}</td><td>${formArrow(p.form)}</td><td>${p.st.apps}</td><td>${p.st.goals}</td><td>${p.st.assists}</td><td>${p.st.apps ? avgRating(p).toFixed(2) : '-'}</td></tr>`).join('')}
