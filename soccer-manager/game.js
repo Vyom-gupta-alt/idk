@@ -1331,8 +1331,10 @@
       name: o.name, short: o.short, hue: o.hue || 360, custom: 1, pids: [], level: lvl, budget: 0, formation: null,
       stadium: o.stadium || `${o.name} Park`,
     });
-    fillSquad(S, club, 24);
-    for (const id of club.pids) { const p = S.players[id]; delete p.nat; assignNat(S, p); }
+    // Your own created players come first; generated players fill the rest of the squad.
+    const mine = makeSpawned(S, (o.players || []).slice(0, MAX_SQUAD), replaceId, 2025);
+    fillSquad(S, club, Math.max(24, Math.min(MAX_SQUAD, mine.length + 6)));
+    for (const id of club.pids) { const p = S.players[id]; if (p.created) continue; delete p.nat; assignNat(S, p); }
     club.level = computeLevel(S, club);
     club.budget = niceRound(clamp(initialBudget(S, club) * (CUSTOM_BUDGET[o.budget] || CUSTOM_BUDGET.normal)[1], 2e6, 600e6));
     invalidate();
@@ -4010,6 +4012,74 @@
     cu.strength = $('#cc-strength').value;
     cu.budget = $('#cc-budget')?.value || cu.budget;
     cu.replace = $('#cc-replace').value;
+    readSpawn('cc');
+  }
+
+  /* --- Player creator: make your own players (name, position, age, OVR, potential, nationality) --- */
+  // 'cc' = players for a club you are creating on the start screen, 'sp' = players added during a career.
+  const SPAWN_MAX = 30;
+  const spawnList = (k) => (k === 'cc' ? (customDefaults().players = customDefaults().players || []) : (ui.spawn = ui.spawn || []));
+  const spawnDefNat = () => (S && S.career ? POOL_NAT[S.leagues[C().leagueId]?.pool] : POOL_NAT[W.leagues[ui.startLeague]?.pool]) || 'ENG';
+  function randomSpawn(base) {
+    const nat = spawnDefNat(), age = randInt(17, 31), ovr = clamp(base + randInt(-6, 6), 45, 92);
+    return { name: genName(NATIONS[nat]?.pool || 'world', null), pos: pick(['GK', 'CB', 'CB', 'LB', 'RB', 'CDM', 'CM', 'CM', 'CAM', 'LW', 'RW', 'ST', 'ST']), age, ovr, pot: clamp(ovr + (age <= 21 ? randInt(6, 16) : age <= 25 ? randInt(1, 6) : 0), ovr, 95), nat };
+  }
+  function spawnRowsHtml(k) {
+    const list = spawnList(k);
+    const nats = Object.values(NATIONS).sort((a, b) => a.name.localeCompare(b.name));
+    const num = (id, v, min, max) => `<input class="input xs" id="${k}-${id}" type="number" min="${min}" max="${max}" value="${v}">`;
+    return `<div class="tbl-wrap"><table class="tbl compact spawn-tbl"><thead><tr><th class="left">Name</th><th>Pos</th><th>Age</th><th>OVR</th><th>POT</th><th class="left">Nation</th><th></th></tr></thead><tbody>
+      ${list.map((r, i) => `<tr>
+        <td class="left"><input class="input sm" id="${k}-name-${i}" maxlength="32" placeholder="Player name" value="${esc(r.name)}"></td>
+        <td><select class="input sm" id="${k}-pos-${i}">${POSITIONS.map((x) => `<option ${x === r.pos ? 'selected' : ''}>${x}</option>`).join('')}</select></td>
+        <td>${num('age-' + i, r.age, 15, 45)}</td><td>${num('ovr-' + i, r.ovr, 30, 99)}</td><td>${num('pot-' + i, r.pot, 30, 99)}</td>
+        <td class="left"><select class="input sm" id="${k}-nat-${i}">${nats.map((n) => `<option value="${n.code}" ${n.code === r.nat ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}</select></td>
+        <td><button class="btn xs ghost danger" data-act="spawn-del" data-id="${k}|${i}" title="Remove">✕</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No players yet. Add a row, or add random players and rename them.</td></tr>'}
+      </tbody></table></div>
+      <div class="row gap wrap"><button class="btn sm" data-act="spawn-add" data-id="${k}|1" ${list.length >= SPAWN_MAX ? 'disabled' : ''}>＋ Add a player</button><button class="btn sm" data-act="spawn-add" data-id="${k}|5" ${list.length >= SPAWN_MAX ? 'disabled' : ''}>＋ Add 5</button>
+        <button class="btn sm ghost" data-act="spawn-rand" data-id="${k}">🎲 Random names for empty rows</button>${list.length ? `<button class="btn sm ghost danger" data-act="spawn-clear" data-id="${k}">Clear all</button>` : ''}<span class="muted small">${list.length}/${SPAWN_MAX}</span></div>`;
+  }
+  function readSpawn(k) {
+    const list = spawnList(k);
+    list.forEach((r, i) => {
+      const el = (f) => $(`#${k}-${f}-${i}`);
+      if (!el('name')) return;
+      r.name = el('name').value.trim(); r.pos = el('pos').value; r.nat = el('nat').value;
+      r.age = clamp(parseInt(el('age').value, 10) || 20, 15, 45);
+      r.ovr = clamp(parseInt(el('ovr').value, 10) || 60, 30, 99);
+      r.pot = clamp(parseInt(el('pot').value, 10) || r.ovr, r.ovr, 99);
+    });
+  }
+  const spawnRedraw = (k) => (k === 'cc' ? renderStart() : spawnModal());
+  // Adds the finished rows to a club (or free agency). Rows without a name are skipped.
+  function makeSpawned(st, rows, clubId, season) {
+    return rows.filter((r) => r.name).map((r) => {
+      const p = addPlayer(st, { name: r.name, pos: r.pos, ovr: r.ovr, age: r.age, clubId });
+      p.pot = Math.max(r.ovr, r.pot); p.nat = NATIONS[r.nat] ? r.nat : null; p.created = 1;
+      p.contract = season + 3; p.wage = wageFor(p); p.relc = 0;
+      return p;
+    });
+  }
+  function spawnModal() {
+    const c = C(), club = S.clubs[c.clubId], dest = ui.spawnDest || 'club';
+    openModal(`<h2>✨ Create players</h2>
+      <p class="muted small">Make your own players: name, position, age, OVR, potential and nationality. Add as many as you like (up to ${SPAWN_MAX} at a time), then create them all at once. They join on a 3-year contract with a normal wage for their rating.</p>
+      ${spawnRowsHtml('sp')}
+      <div class="row gap wrap mt"><label class="inline">Put them <select class="input sm" id="sp-dest">${[['club', `In my squad (${club.pids.length}/${MAX_SQUAD})`], ['FA', 'In free agency (sign them later)']].map(([v, l]) => `<option value="${v}" ${dest === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <button class="btn primary" data-act="spawn-create">Create players</button><button class="btn ghost" data-act="close">Close</button></div>`, true);
+  }
+  function spawnCreate() {
+    readSpawn('sp');
+    const c = C(), club = S.clubs[c.clubId], dest = (ui.spawnDest = $('#sp-dest').value);
+    const rows = ui.spawn.filter((r) => r.name);
+    if (!rows.length) return toast('Give at least one player a name.', 'bad');
+    if (dest === 'club' && club.pids.length + rows.length > MAX_SQUAD) return toast(`Your squad can take ${Math.max(0, MAX_SQUAD - club.pids.length)} more player(s) (max ${MAX_SQUAD}). Put the rest in free agency, or release someone.`, 'bad');
+    const made = makeSpawned(S, rows, dest === 'club' ? c.clubId : 'FA', c.season);
+    ui.spawn = ui.spawn.filter((r) => !r.name);
+    invalidate(); cleanLineup(); save();
+    news(`✨ ${made.length} new player${made.length > 1 ? 's' : ''} created${dest === 'club' ? ` and added to ${club.name}` : ' as free agents'}: ${made.map((p) => `${p.name} (${p.pos}, ${p.ovr})`).join(', ')}.`, 'good');
+    toast(`${made.length} player${made.length > 1 ? 's' : ''} created.`, 'good');
+    closeModal(); render();
   }
   function renderStart() {
     clearTimers();
@@ -4048,6 +4118,9 @@
               <label>Takes the place of<select class="input" id="cc-replace">${clubs.slice().reverse().map(({ c }) => `<option value="${c.id}" ${cu.replace === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
             </div>
             <p class="muted small">Your club gets a generated squad built around the strength you pick. The club it replaces leaves the league, and its players become free agents you can try to sign.</p>
+            <h4>✨ Your own players <span class="muted small">optional</span></h4>
+            <p class="muted small">Create players with your own names and ratings. They are in your squad from day one; generated players fill the remaining places.</p>
+            ${spawnRowsHtml('cc')}
           </div>` : ''}`;
     }
     const leagueCards = (tier, region) => W.leagueOrder.map((id) => W.leagues[id]).filter((l) => (l.tier || 1) === tier && (l.region || 'Europe') === region).map((l) => `
@@ -4899,7 +4972,7 @@
           </div>
         </section>
         <section class="card">
-          <h3>Squad <span class="muted small">${club.pids.length}/${MAX_SQUAD} players · wages ${money(bill)}/wk of ${money(c.wageBudget)}</span></h3>
+          <h3>Squad <span class="muted small">${club.pids.length}/${MAX_SQUAD} players · wages ${money(bill)}/wk of ${money(c.wageBudget)}</span><button class="btn xs primary ml-auto" data-act="spawn-open">✨ Create players</button></h3>
           <div class="bulk-bar row gap wrap">${bulk.length ? `<strong>${bulk.length} selected</strong><button class="btn sm primary" data-act="bulk-renew">✍️ Renew contracts</button><button class="btn sm" data-act="bulk-sell">💰 Sell</button><button class="btn sm ghost" data-act="bulk-clear">Clear</button>` : '<span class="muted small">Tick players to renew or sell several at once.</span>'}${expCount ? `<button class="btn sm ghost" data-act="bulk-expiring">Select expiring (${expCount})</button>` : ''}</div>
           <div class="tbl-wrap"><table class="tbl squad-tbl"><thead><tr>
             <th><input type="checkbox" data-act="bulk-all" title="Select all" ${bulk.length && bulk.length === club.pids.length ? 'checked' : ''}></th>${th('pos', 'Pos')}<th class="left">Name</th>${th('age', 'Age')}${th('ovr', 'OVR')}${th('pot', 'POT')}${selPos ? `<th title="Rating in ${selPos}">@${selPos}</th>` : ''}<th>Form</th><th>Apps</th>${th('goals', 'G')}<th>A</th>${th('rating', 'Avg')}${th('value', 'Value')}${th('wage', 'Wage')}<th>Contract</th><th></th>
@@ -5794,7 +5867,7 @@
         if (!cu.name) { toast('Give your club a name.', 'bad'); $('#cc-name')?.focus(); return; }
         if (Object.values(W.clubs).some((cl) => isClub(cl) && cl.id !== cu.replace && norm(cl.name) === norm(cu.name))) return toast('A club with that name already exists.', 'bad');
         const short = (cu.short || cu.name.replace(/[^A-Za-z]/g, '').slice(0, 3) || 'NEW').toUpperCase().slice(0, 4);
-        custom = { name: cu.name, short, stadium: cu.stadium, hue: cu.hue, strength: cu.strength, budget: cu.budget };
+        custom = { name: cu.name, short, stadium: cu.stadium, hue: cu.hue, strength: cu.strength, budget: cu.budget, players: (cu.players || []).filter((r) => r.name) };
         clubId = cu.replace;
       }
       const saved = loadMeta();
@@ -5907,6 +5980,17 @@
     'bulk-toggle': (id) => { const b = bulkSel(); ui.bulk = b.includes(id) ? b.filter((x) => x !== id) : b.concat(id); render(); },
     'bulk-all': () => { const all = S.clubs[C().clubId].pids; ui.bulk = bulkSel().length === all.length ? [] : all.slice(); render(); },
     'bulk-clear': () => { ui.bulk = []; render(); },
+    'spawn-open': () => { ui.spawn = ui.spawn && ui.spawn.length ? ui.spawn : [randomSpawn(clubRating(C().clubId))].map((r) => ({ ...r, name: '' })); spawnModal(); },
+    'spawn-add': (id) => {
+      const [k, n] = id.split('|'); if (k === 'cc') readCustom(); else readSpawn(k);
+      const list = spawnList(k), base = k === 'cc' ? 72 : clubRating(C().clubId);
+      for (let i = 0; i < +n && list.length < SPAWN_MAX; i++) list.push({ ...randomSpawn(base), name: '' });
+      spawnRedraw(k);
+    },
+    'spawn-del': (id) => { const [k, i] = id.split('|'); if (k === 'cc') readCustom(); else readSpawn(k); spawnList(k).splice(+i, 1); spawnRedraw(k); },
+    'spawn-rand': (k) => { if (k === 'cc') readCustom(); else readSpawn(k); for (const r of spawnList(k)) if (!r.name) r.name = genName(NATIONS[r.nat]?.pool || 'world', null); spawnRedraw(k); },
+    'spawn-clear': (k) => { spawnList(k).length = 0; if (k === 'cc') readCustom(); spawnRedraw(k); },
+    'spawn-create': () => spawnCreate(),
     'bulk-expiring': () => { ui.bulk = S.clubs[C().clubId].pids.filter((id) => expiring(S.players[id])); render(); },
     'bulk-renew': () => { ui.bulkMsg = null; ui.bulkTerms = {}; bulkRenewModal(bulkSel().slice()); },
     'bulk-renew-exp': () => { ui.bulkMsg = null; ui.bulkTerms = {}; bulkRenewModal(S.clubs[C().clubId].pids.filter((id) => expiring(S.players[id]))); },

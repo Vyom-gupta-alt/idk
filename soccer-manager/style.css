@@ -638,3 +638,7 @@ body.m3d-open { overflow: hidden; }
 .adv-profile h3 { margin: 0; }
 .adv-side { margin-left: auto; display: flex; flex-direction: column; gap: .3rem; align-items: flex-end; max-width: 360px; text-align: right; }
 @media (max-width: 700px) { .adv-side { margin-left: 0; align-items: flex-start; text-align: left; } }
+
+/* Player creator */
+.spawn-tbl input[id*="-name-"] { min-width: 10rem; }
+.spawn-tbl td { padding: .25rem .3rem; }
